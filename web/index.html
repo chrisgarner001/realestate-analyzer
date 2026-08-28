@@ -1212,13 +1212,7 @@ function app() {
     },
 
     placeInvestmentCardInReport() {
-      const card = this.$refs.investmentCard;
-      const report = this.$root.querySelector('.stream-content');
-      if (!card || !report) return;
-      const heading = [...report.querySelectorAll('h2, h3')].find(element =>
-        element.textContent.trim().toLowerCase() === 'investment analysis'
-      );
-      if (heading) heading.after(card);
+      this.resetInvestmentCardPosition();
     },
 
     tryParseScore(text) {
