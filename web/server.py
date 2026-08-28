@@ -850,6 +850,20 @@ async def user_analyses(current_user: User = Depends(auth.get_current_user), db:
         for analysis, lead in rows
     ]
 
+@app.delete("/api/analyses/{analysis_id}")
+async def delete_user_analysis(
+    analysis_id: int,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    analysis = db.query(Analysis).filter_by(id=analysis_id, user_id=current_user.id).first()
+    if not analysis:
+        raise HTTPException(404, "Report not found")
+    db.query(BuyerLead).filter_by(analysis_id=analysis.id).delete(synchronize_session=False)
+    db.delete(analysis)
+    db.commit()
+    return {"ok": True, "id": analysis_id}
+
 # ── Admin API ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/admin/users")

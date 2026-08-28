@@ -187,11 +187,16 @@
         <div x-show="!loadingHistory&&reports.length===0" class="p-5 text-center text-xs" style="color:var(--muted)">No completed reports yet.</div>
         <div x-show="!loadingHistory&&reports.length>0" class="max-h-80 overflow-y-auto">
           <template x-for="report in reports" :key="report.id">
-            <button @click="loadReport(report)" class="w-full text-left px-4 py-3 border-b hover:bg-white/5" style="border-color:var(--border)">
-              <p class="text-sm font-medium truncate" x-text="report.address||'Untitled property'"></p>
-              <p class="text-xs mt-1" style="color:var(--muted)" x-text="formatReportDate(report.created_at)+' · '+report.analysis_type"></p>
-              <p class="text-xs mt-1 truncate" style="color:var(--muted)" x-text="'Buyer: '+(report.buyer_name||'—')"></p>
-            </button>
+            <div class="flex items-center gap-3 px-4 py-3 border-b hover:bg-white/5" style="border-color:var(--border)">
+              <button @click="loadReport(report)" class="min-w-0 flex-1 text-left">
+                <p class="text-sm font-medium truncate" x-text="report.address||'Untitled property'"></p>
+                <p class="text-xs mt-1" style="color:var(--muted)" x-text="formatReportDate(report.created_at)+' · '+report.analysis_type"></p>
+                <p class="text-xs mt-1 truncate" style="color:var(--muted)" x-text="'Buyer: '+(report.buyer_name||'—')"></p>
+              </button>
+              <button @click.stop="deleteReport(report)" class="flex-shrink-0 p-2 rounded-lg" style="color:#f87171;background:rgba(239,68,68,.1)" title="Delete report" aria-label="Delete report">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5a1 1 0 011-1h2a1 1 0 011 1v2m2 0v12a1 1 0 01-1 1H9a1 1 0 01-1-1V7m3 4v5m2-5v5"/></svg>
+              </button>
+            </div>
           </template>
         </div>
       </div>
@@ -1116,6 +1121,7 @@ function app() {
 
     loadReport(report) {
       this.historyOpen = false;
+      this.currentReportId = report.id;
       this.address = report.address || '';
       this.streetAddress = report.address || '';
       this.city = ''; this.state = ''; this.zip = '';
@@ -1128,6 +1134,18 @@ function app() {
       this.hasResults = Boolean(this.streamText);
       this.tryParseScore(this.streamText);
       this.$nextTick(() => this.placeInvestmentCardInReport());
+    },
+
+    async deleteReport(report) {
+      if (!window.confirm('Delete this report permanently?')) return;
+      try {
+        const r = await fetch(`/api/analyses/${report.id}`, {
+          method: 'DELETE', headers: { Authorization: `Bearer ${this.token}` }
+        });
+        if (!r.ok) return;
+        this.reports = this.reports.filter(item => item.id !== report.id);
+        if (this.currentReportId === report.id) this.clearResults();
+      } catch(e) {}
     },
 
     getModeDesc() { const m = this.modes.find(m=>m.id===this.analysisType); return m?m.desc:''; },
@@ -1151,7 +1169,7 @@ function app() {
     },
 
     clearResults() {
-      this.hasResults=false; this.streamText=''; this.scoreData=null;
+      this.hasResults=false; this.streamText=''; this.scoreData=null; this.currentReportId=null;
       this.errorMsg=''; this.askingPrice='';
     },
 
