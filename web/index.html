@@ -593,6 +593,19 @@
         Tax at <span x-text="propertyTaxRate+'%'"></span> annually · Insurance at 0.5% · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
       </p>
 
+      <div class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
+        <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style="background:var(--navy-mid)">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Rental Income &amp; Cash Flow</p>
+            <p class="text-xs" style="color:var(--muted)">Adjust the average rent to recalculate the cash-flow figures below.</p>
+          </div>
+          <label class="flex items-center gap-2 text-xs" style="color:var(--muted)">
+            Average monthly rent
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="rentOverride" type="number" min="0" step="50" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></span>
+          </label>
+        </div>
+      </div>
+
       <!-- ── DSCR Investment Loan Card ──────────────────────────────── -->
       <div x-show="getDSCRCard()" class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
         <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style="background:var(--navy-mid)">
@@ -623,14 +636,6 @@
               :style="getDSCRCard()?.comfortable?'background:rgba(34,197,94,.15);color:#4ade80':getDSCRCard()?.qualifies?'background:rgba(201,152,46,.15);color:#e0b043':'background:rgba(239,68,68,.15);color:#f87171'"
               x-text="getDSCRCard()?.comfortable?'✓ Qualifies (≥1.25)':getDSCRCard()?.qualifies?'Borderline (1.0–1.24)':'Does Not Qualify (<1.0)'"></span>
           </div>
-        </div>
-
-        <div class="px-4 py-3 flex flex-wrap items-center gap-3 border-t" style="border-color:var(--border)">
-          <label class="flex items-center gap-2 text-xs" style="color:var(--muted)">
-            Average monthly rent
-            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="rentOverride" type="number" min="0" step="50" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></span>
-          </label>
-          <span class="text-xs" style="color:var(--muted)">Adjusts the cash-flow and DSCR figures below.</span>
         </div>
 
         <!-- Metrics row -->
