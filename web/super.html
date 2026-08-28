@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Superadmin — RE Analyzer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root {
+    --navy: #1a2332; --navy-deep: #0f1923; --navy-mid: #243044;
+    --navy-light: #2e3d52; --green: #2d8a4e; --green-light: #38a862;
+    --gold: #c9982e; --gold-light: #e0b043; --text: #e2e8f0;
+    --muted: #94a3b8; --border: #2e3d52;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--navy-deep); color: var(--text); font-family: 'Inter', system-ui, sans-serif; }
+  .card { background: var(--navy); border: 1px solid var(--border); }
+  input, select, textarea { background: var(--navy-mid); border: 1px solid var(--border); color: var(--text); font-size: 14px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--green); }
+  input::placeholder { color: var(--muted); }
+  .btn-primary { background: var(--green); color: white; transition: filter .15s; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity:.6; cursor:not-allowed; filter:none; }
+  .tab-active   { border-bottom: 2px solid var(--green); color: var(--text); }
+  .tab-inactive { border-bottom: 2px solid transparent; color: var(--muted); }
+  .tab-inactive:hover { color: var(--text); }
+  [x-cloak] { display: none !important; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--navy-deep); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  table { border-collapse: collapse; }
+  th { background: var(--navy-mid); color: var(--gold-light); padding: .45rem .75rem; text-align: left; font-size: .75rem; font-weight: 600; border: 1px solid var(--border); }
+  td { padding: .4rem .75rem; border: 1px solid var(--border); font-size: .8rem; color: #cbd5e1; }
+  tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+</style>
+</head>
+<body x-data="superadmin()" x-init="init()">
+
+<!-- Login -->
+<div x-show="!currentUser" x-cloak class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background:var(--navy-deep)">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-6">
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:var(--green)">
+        <svg class="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+      </div>
+      <h2 class="text-xl font-bold">Superadmin</h2>
+      <p class="text-sm mt-1" style="color:var(--muted)">RE Investor Analyzer — Platform Control</p>
+    </div>
+    <div class="card rounded-2xl p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Email</label>
+        <input x-model="loginEmail" type="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="admin@yourapp.com" @keydown.enter="login()">
+      </div>
+      <div>
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Password</label>
+        <input x-model="loginPassword" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••" @keydown.enter="login()">
+      </div>
+      <div x-show="loginError" class="text-xs text-red-400 text-center py-1.5 px-3 rounded" style="background:rgba(239,68,68,.08)" x-text="loginError"></div>
+      <button @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
+        class="btn-primary w-full font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
+        <svg x-show="loginLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="loginLoading?'Signing in...':'Sign In'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- App shell -->
+<div x-show="currentUser" x-cloak class="min-h-screen">
+
+  <!-- Header -->
+  <header class="card border-b border-gray-700/50 px-6 py-4 flex items-center justify-between sticky top-0 z-40">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:var(--green)">
+        <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-bold">Platform Superadmin</p>
+        <p class="text-xs" style="color:var(--muted)">RE Investor Analyzer</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs" style="color:var(--muted)" x-text="currentUser&&currentUser.email"></span>
+      <button @click="logout()" class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1" style="background:var(--navy-mid);color:var(--muted)">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+        </svg>
+        Sign Out
+      </button>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <div class="card border-b border-gray-700/50 px-6">
+    <div class="flex gap-0">
+      <button @click="tab='tenants'" :class="tab==='tenants'?'tab-active':'tab-inactive'" class="text-sm font-medium px-4 py-3.5">
+        Tenants
+        <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full" style="background:var(--navy-mid)" x-text="tenants.length"></span>
+      </button>
+      <button @click="tab='stats';loadStats()" :class="tab==='stats'?'tab-active':'tab-inactive'" class="text-sm font-medium px-4 py-3.5">Stats</button>
+      <button @click="tab='create'" :class="tab==='create'?'tab-active':'tab-inactive'" class="text-sm font-medium px-4 py-3.5">+ New Tenant</button>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+
+    <!-- ── TENANTS TAB ───────────────────────────────────────────────────── -->
+    <div x-show="tab==='tenants'" class="space-y-5">
+      <div class="card rounded-xl overflow-hidden">
+        <div class="px-5 py-3.5 flex items-center justify-between border-b" style="border-color:var(--border)">
+          <p class="text-sm font-semibold">All Tenants</p>
+          <button @click="loadTenants()" class="text-xs px-3 py-1.5 rounded-lg" style="background:var(--navy-mid);color:var(--muted)">Refresh</button>
+        </div>
+        <div x-show="loadingTenants" class="p-8 text-center text-sm" style="color:var(--muted)">Loading...</div>
+        <div x-show="!loadingTenants&&tenants.length===0" class="p-8 text-center text-sm" style="color:var(--muted)">No tenants yet. Create one →</div>
+        <div x-show="!loadingTenants&&tenants.length>0" class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr><th>Company</th><th>Slug / URL</th><th>Users</th><th>Tokens</th><th>Daily Limit</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <template x-for="t in tenants" :key="t.id">
+                <tr>
+                  <td>
+                    <div class="flex items-center gap-2">
+                      <div class="w-5 h-5 rounded flex-shrink-0" :style="'background:'+(t.primary_color||'#2d8a4e')"></div>
+                      <span x-text="t.company_name"></span>
+                    </div>
+                  </td>
+                  <td>
+                    <a :href="'/'+t.slug" target="_blank" class="hover:underline text-blue-400 font-mono text-xs"
+                      x-text="'/'+t.slug"></a>
+                  </td>
+                  <td class="text-center" x-text="t.user_count??'—'"></td>
+                  <td class="text-center" x-text="t.token_balance??0"></td>
+                  <td class="text-center" x-text="t.daily_limit"></td>
+                  <td>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                      :style="t.is_active?'background:rgba(34,197,94,.1);color:#4ade80':'background:rgba(239,68,68,.1);color:#f87171'"
+                      x-text="t.is_active?'Active':'Inactive'"></span>
+                  </td>
+                  <td x-text="formatDate(t.created_at)"></td>
+                  <td>
+                    <div class="flex gap-1.5">
+                      <a :href="'/'+t.slug+'/admin'" target="_blank"
+                        class="text-xs px-2.5 py-1 rounded-lg" style="background:rgba(45,138,78,.12);color:#4ade80">
+                        Admin Panel
+                      </a>
+                      <button @click="toggleTenant(t)"
+                        class="text-xs px-2.5 py-1 rounded-lg"
+                        :style="t.is_active?'background:rgba(239,68,68,.1);color:#f87171':'background:rgba(34,197,94,.1);color:#4ade80'"
+                        x-text="t.is_active?'Deactivate':'Activate'"></button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STATS TAB ─────────────────────────────────────────────────────── -->
+    <div x-show="tab==='stats'" class="space-y-5">
+      <div x-show="loadingStats" class="p-8 text-center text-sm" style="color:var(--muted)">Loading stats...</div>
+      <div x-show="!loadingStats&&stats" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="card rounded-xl p-5 text-center">
+          <p class="text-3xl font-bold" style="color:var(--green)" x-text="stats&&stats.total_tenants"></p>
+          <p class="text-xs mt-1" style="color:var(--muted)">Total Tenants</p>
+        </div>
+        <div class="card rounded-xl p-5 text-center">
+          <p class="text-3xl font-bold" style="color:var(--gold)" x-text="stats&&stats.total_users"></p>
+          <p class="text-xs mt-1" style="color:var(--muted)">Total Users</p>
+        </div>
+        <div class="card rounded-xl p-5 text-center">
+          <p class="text-3xl font-bold" style="color:#60a5fa" x-text="stats&&stats.total_analyses"></p>
+          <p class="text-xs mt-1" style="color:var(--muted)">Total Analyses</p>
+        </div>
+        <div class="card rounded-xl p-5 text-center">
+          <p class="text-3xl font-bold" style="color:#c084fc" x-text="stats&&stats.analyses_today"></p>
+          <p class="text-xs mt-1" style="color:var(--muted)">Analyses Today</p>
+        </div>
+      </div>
+
+      <!-- Top tenants by usage -->
+      <div x-show="!loadingStats&&stats&&stats.top_tenants&&stats.top_tenants.length" class="card rounded-xl overflow-hidden">
+        <div class="px-5 py-3.5 border-b" style="border-color:var(--border)">
+          <p class="text-sm font-semibold">Top Tenants by Usage</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead><tr><th>Company</th><th>Slug</th><th>Users</th><th>Total Analyses</th><th>Today</th></tr></thead>
+            <tbody>
+              <template x-for="t in (stats&&stats.top_tenants||[])" :key="t.id">
+                <tr>
+                  <td x-text="t.company_name"></td>
+                  <td><span class="font-mono text-xs" x-text="t.slug"></span></td>
+                  <td class="text-center" x-text="t.user_count"></td>
+                  <td class="text-center" x-text="t.analysis_count"></td>
+                  <td class="text-center" x-text="t.analyses_today"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CREATE TENANT TAB ─────────────────────────────────────────────── -->
+    <div x-show="tab==='create'" class="space-y-5">
+      <div class="card rounded-xl p-5 sm:p-6 space-y-5">
+        <div>
+          <p class="text-sm font-semibold mb-1" style="color:var(--gold-light)">Create New Tenant</p>
+          <p class="text-xs" style="color:var(--muted)">This creates the company profile and sets up their branded URL. Then add their admin user from the tenant's admin panel.</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Company Name <span class="text-red-400">*</span></label>
+            <input x-model="newTenant.company_name" type="text" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="LoanStar Mortgage">
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">
+              URL Slug <span class="text-red-400">*</span>
+              <span class="ml-1 font-normal" style="color:var(--muted)">— letters/numbers/hyphens only</span>
+            </label>
+            <div class="flex gap-0">
+              <span class="flex items-center px-3 rounded-l-lg text-xs" style="background:var(--navy-light);border:1px solid var(--border);border-right:none;color:var(--muted);white-space:nowrap">yourapp.com/</span>
+              <input x-model="newTenant.slug" type="text" class="flex-1 rounded-r-lg px-3 py-2.5 text-sm" placeholder="loanstar"
+                @input="newTenant.slug=newTenant.slug.toLowerCase().replace(/[^a-z0-9-]/g,'')">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Brand Color</label>
+            <div class="flex gap-2">
+              <input x-model="newTenant.primary_color" type="color" class="h-10 w-14 rounded-lg p-1 cursor-pointer" style="background:var(--navy-mid);border:1px solid var(--border)">
+              <input x-model="newTenant.primary_color" type="text" class="flex-1 rounded-lg px-3 py-2.5 text-sm" placeholder="#2d8a4e">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Daily Analysis Limit</label>
+            <input x-model.number="newTenant.daily_limit" type="number" min="1" max="100" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="5">
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Initial Analysis Tokens</label>
+            <input x-model.number="newTenant.token_balance" type="number" min="0" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="100">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Welcome Message (optional)</label>
+            <input x-model="newTenant.welcome_message" type="text" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Sign in to access your exclusive property analysis tools.">
+          </div>
+        </div>
+
+        <div class="border-t pt-4" style="border-color:var(--border)">
+          <p class="text-xs font-semibold mb-3" style="color:var(--muted)">ADMIN ACCOUNT (first admin for this tenant)</p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-xs mb-1" style="color:var(--muted)">Admin Name</label>
+              <input x-model="newTenant.admin_name" type="text" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="John Doe">
+            </div>
+            <div>
+              <label class="block text-xs mb-1" style="color:var(--muted)">Admin Email <span class="text-red-400">*</span></label>
+              <input x-model="newTenant.admin_email" type="email" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="admin@loanstar.com">
+            </div>
+            <div>
+              <label class="block text-xs mb-1" style="color:var(--muted)">Admin Password <span class="text-red-400">*</span></label>
+              <input x-model="newTenant.admin_password" type="text" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Temporary password">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4 pt-1">
+          <button @click="createTenant()" :disabled="creatingTenant||!newTenant.company_name||!newTenant.slug||!newTenant.admin_email||!newTenant.admin_password"
+            class="btn-primary font-semibold px-8 py-3 rounded-xl text-sm flex items-center gap-2">
+            <svg x-show="creatingTenant" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span x-text="creatingTenant?'Creating...':'Create Tenant'"></span>
+          </button>
+          <span x-show="createMsg" class="text-sm" :style="createMsgType==='ok'?'color:#4ade80':'color:#f87171'" x-text="createMsg"></span>
+        </div>
+      </div>
+
+      <!-- Success card -->
+      <div x-show="createdTenant" x-cloak class="card rounded-xl p-5 border-green-800/50" style="border-color:#166534">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:rgba(34,197,94,.15)">
+            <svg class="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <div class="flex-1 space-y-2">
+            <p class="text-sm font-semibold text-green-400">Tenant Created Successfully</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div class="rounded-lg p-3" style="background:var(--navy-mid)">
+                <p style="color:var(--muted)">Realtor URL</p>
+                <a :href="createdTenant&&'/'+createdTenant.slug" target="_blank" class="font-mono text-blue-400 hover:underline" x-text="createdTenant&&(location.origin+'/'+createdTenant.slug)"></a>
+              </div>
+              <div class="rounded-lg p-3" style="background:var(--navy-mid)">
+                <p style="color:var(--muted)">Admin Panel URL</p>
+                <a :href="createdTenant&&'/'+createdTenant.slug+'/admin'" target="_blank" class="font-mono text-blue-400 hover:underline" x-text="createdTenant&&(location.origin+'/'+createdTenant.slug+'/admin')"></a>
+              </div>
+            </div>
+            <p class="text-xs" style="color:var(--muted)">Share the Realtor URL with realtors and the Admin Panel URL with the company's manager.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function superadmin() {
+  return {
+    token: null, currentUser: null,
+    loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
+
+    tab: 'tenants',
+
+    // Tenants
+    tenants: [], loadingTenants: false,
+
+    // Stats
+    stats: null, loadingStats: false,
+
+    // Create
+    newTenant: { company_name:'', slug:'', primary_color:'#2d8a4e', daily_limit:5, token_balance:0, welcome_message:'',
+                  admin_name:'', admin_email:'', admin_password:'' },
+    creatingTenant: false, createMsg: '', createMsgType: 'ok', createdTenant: null,
+
+    async init() {
+      const saved = localStorage.getItem('re_super_token');
+      if (saved) {
+        try {
+          const r = await fetch('/api/me', { headers: { Authorization: `Bearer ${saved}` } });
+          if (r.ok) {
+            const u = await r.json();
+            if (u.role === 'superadmin') {
+              this.token = saved;
+              this.currentUser = u;
+              await this.loadTenants();
+              return;
+            }
+          }
+        } catch(e) {}
+        localStorage.removeItem('re_super_token');
+      }
+    },
+
+    async login() {
+      if (this.loginLoading) return;
+      this.loginLoading = true; this.loginError = '';
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword, slug: null })
+        });
+        const data = await r.json();
+        if (!r.ok) { this.loginError = data.detail || 'Login failed'; return; }
+        if (data.user.role !== 'superadmin') { this.loginError = 'Superadmin access required'; return; }
+        this.token = data.access_token;
+        this.currentUser = data.user;
+        localStorage.setItem('re_super_token', this.token);
+        this.loginPassword = '';
+        await this.loadTenants();
+      } catch(e) { this.loginError = 'Connection error.'; }
+      finally { this.loginLoading = false; }
+    },
+
+    logout() {
+      localStorage.removeItem('re_super_token');
+      this.token = null; this.currentUser = null;
+    },
+
+    authHeaders() { return { Authorization: `Bearer ${this.token}` }; },
+
+    async loadTenants() {
+      this.loadingTenants = true;
+      try {
+        const r = await fetch('/api/super/tenants', { headers: this.authHeaders() });
+        if (r.ok) this.tenants = await r.json();
+      } finally { this.loadingTenants = false; }
+    },
+
+    async loadStats() {
+      if (this.stats) return; // cached
+      this.loadingStats = true;
+      try {
+        const r = await fetch('/api/super/stats', { headers: this.authHeaders() });
+        if (r.ok) this.stats = await r.json();
+      } finally { this.loadingStats = false; }
+    },
+
+    async toggleTenant(t) {
+      try {
+        const r = await fetch(`/api/super/tenants/${t.id}`, {
+          method: 'PUT', headers: { ...this.authHeaders(), 'Content-Type':'application/json' },
+          body: JSON.stringify({ is_active: !t.is_active })
+        });
+        if (r.ok) { t.is_active = !t.is_active; }
+      } catch(e) {}
+    },
+
+    async createTenant() {
+      this.creatingTenant = true; this.createMsg = ''; this.createdTenant = null;
+      try {
+        const r = await fetch('/api/super/tenants', {
+          method: 'POST', headers: { ...this.authHeaders(), 'Content-Type':'application/json' },
+          body: JSON.stringify(this.newTenant)
+        });
+        const data = await r.json();
+        if (!r.ok) { this.createMsg = data.detail || 'Error creating tenant'; this.createMsgType = 'err'; return; }
+        this.createdTenant = data;
+        this.createMsg = ''; this.createMsgType = 'ok';
+        this.newTenant = { company_name:'', slug:'', primary_color:'#2d8a4e', daily_limit:5, token_balance:0, welcome_message:'',
+                           admin_name:'', admin_email:'', admin_password:'' };
+        await this.loadTenants();
+        this.tab = 'tenants';
+      } catch(e) { this.createMsg = 'Connection error'; this.createMsgType = 'err'; }
+      finally { this.creatingTenant = false; }
+    },
+
+    formatDate(dt) {
+      if (!dt) return '—';
+      const d = new Date(dt.endsWith('Z') ? dt : dt + 'Z');
+      return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    }
+  };
+}
+</script>
+</body>
+</html>

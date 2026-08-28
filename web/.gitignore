@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+data/
+*.db
+
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+.vercel

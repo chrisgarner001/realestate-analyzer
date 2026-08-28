@@ -1,0 +1,16 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local secrets and generated data
+.env
+*.db
+*.pdf
+
+# Deployment and OS metadata
+.vercel/
+.DS_Store
+.vercel

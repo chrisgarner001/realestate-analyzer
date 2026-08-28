@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PropMind — AI Property Analyzer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  :root {
+    --navy: #223149; --navy-deep: #142235; --navy-mid: #2d405b;
+    --navy-light: #3b526f; --green: #2d9b58; --green-light: #4bc477;
+    --gold: #d8a83d; --gold-light: #f0c45b; --text: #f1f5f9;
+    --muted: #b0bfd0; --border: #405671;
+  }
+  * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+  body { background: var(--navy-deep); color: var(--text); font-family: 'Inter', system-ui, sans-serif; padding-bottom: env(safe-area-inset-bottom); }
+  .card { background: var(--navy); border: 1px solid var(--border); }
+  .pill { transition: all 0.15s ease; touch-action: manipulation; white-space: nowrap; }
+  .pill.active { background: var(--green); color: white; }
+  .pill:not(.active) { background: var(--navy-mid); color: var(--muted); }
+  .pill:not(.active):hover { background: var(--navy-light); color: var(--text); }
+  .btn-analyze { background: var(--green); transition: background 0.15s ease; touch-action: manipulation; }
+  .btn-analyze:hover, .btn-analyze:active { background: var(--green-light); }
+  .btn-analyze:disabled { background: #374151; cursor: not-allowed; opacity: 0.6; }
+  input, select { background: var(--navy-mid); border: 1px solid var(--border); color: var(--text); font-size: 16px !important; }
+  input:focus, select:focus { outline: none; border-color: var(--green); }
+  input::placeholder { color: var(--muted); }
+  .score-ring-bg { stroke: var(--navy-mid); }
+  .score-ring-fill { stroke-linecap: round; transition: stroke-dasharray 1s ease; }
+  .score-green { stroke: #22c55e; } .score-gold { stroke: var(--gold); } .score-red { stroke: #ef4444; }
+  .bar-fill { transition: width 1s ease; }
+  .stream-content h1, .stream-content h2, .stream-content h3 { color: var(--gold-light); margin-top: 1.25rem; margin-bottom: 0.5rem; font-weight: 600; }
+  .stream-content h1 { font-size: 1.15rem; } .stream-content h2 { font-size: 1.05rem; } .stream-content h3 { font-size: 0.95rem; }
+  .stream-content p { margin-bottom: 0.75rem; line-height: 1.7; color: #cbd5e1; }
+  .stream-content ul, .stream-content ol { margin: 0.5rem 0 0.75rem 1.25rem; color: #cbd5e1; }
+  .stream-content li { margin-bottom: 0.3rem; line-height: 1.6; }
+  .stream-content strong { color: var(--text); font-weight: 600; }
+  .stream-content .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0.75rem 0; }
+  .stream-content table { width: 100%; border-collapse: collapse; font-size: 0.8rem; min-width: 400px; }
+  .stream-content th { background: var(--navy-mid); color: var(--gold-light); padding: 0.45rem 0.6rem; text-align: left; border: 1px solid var(--border); }
+  .stream-content td { padding: 0.4rem 0.6rem; border: 1px solid var(--border); color: #cbd5e1; }
+  .stream-content tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .stream-content code { background: var(--navy-mid); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em; color: #93c5fd; }
+  .stream-content pre { background: var(--navy-mid); padding: 0.75rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
+  .stream-content pre code { background: none; padding: 0; color: #93c5fd; }
+  .stream-content blockquote { border-left: 3px solid var(--gold); padding-left: 1rem; color: var(--muted); margin: 0.75rem 0; }
+  .stream-content hr { border-color: var(--border); margin: 1rem 0; }
+  .disclaimer { font-size: 0.68rem; color: var(--muted); border-top: 1px solid var(--border); }
+  .pulse-dot { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .fade-in { animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .status-icon { animation: statusPulse 1.8s ease-in-out infinite; }
+  @keyframes statusPulse { 0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(45,138,78,.28)} 50%{transform:scale(1.05);box-shadow:0 0 0 10px rgba(45,138,78,0)} }
+  .status-progress { animation: statusProgress 14s ease-in-out infinite; }
+  @keyframes statusProgress { 0%{width:12%} 35%{width:42%} 65%{width:68%} 100%{width:88%} }
+  .pills-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .pills-scroll::-webkit-scrollbar { display: none; }
+  /* Sticky bottom bar on mobile */
+  .sticky-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); background: var(--navy); border-top: 1px solid var(--border); }
+  @media (min-width: 640px) { .sticky-bar { display: none !important; } }
+  .mobile-spacer { height: 70px; }
+  @media (min-width: 640px) { .mobile-spacer { display: none; } }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--navy-deep); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  [x-cloak] { display: none !important; }
+  .login-card { background: var(--navy); border: 1px solid var(--border); }
+  .brand-accent { background: var(--brand, var(--green)); }
+  .btn-login { background: var(--brand, var(--green)); transition: filter 0.15s; }
+  .btn-login:hover { filter: brightness(1.15); }
+  .btn-login:disabled { opacity: 0.6; cursor: not-allowed; filter: none; }
+</style>
+</head>
+<body x-data="app()" x-init="init()">
+
+<!-- Login Overlay — outside the app wrapper so it's always visible when showLogin=true -->
+<div x-show="showLogin"
+  class="fixed inset-0 z-50 flex items-center justify-center px-4"
+  style="background:var(--navy-deep)">
+  <div class="w-full max-w-sm">
+    <!-- Logo / Brand -->
+    <div class="text-center mb-6">
+      <div x-show="tenant&&tenant.logo_url" class="mb-3 flex justify-center">
+        <img :src="tenant&&tenant.logo_url" alt="logo" class="h-14 object-contain rounded-lg">
+      </div>
+      <div x-show="!tenant||!tenant.logo_url" class="mb-3 flex justify-center">
+        <div class="w-14 h-14 rounded-2xl flex items-center justify-center brand-accent">
+          <svg class="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+        </div>
+      </div>
+      <h2 class="text-xl font-bold" x-text="tenant&&tenant.company_name?tenant.company_name:'RE Investor Analyzer'"></h2>
+      <p class="text-sm mt-1" style="color:var(--muted)" x-text="tenant&&tenant.welcome_message?tenant.welcome_message:'Sign in to access your property analysis tools'"></p>
+    </div>
+
+    <!-- Form -->
+    <div class="login-card rounded-2xl p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Email Address</label>
+        <input x-model="loginEmail" type="email" autocomplete="email" inputmode="email"
+          class="w-full rounded-lg px-4 py-3 text-sm" placeholder="you@example.com"
+          @keydown.enter="login()">
+      </div>
+      <div>
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Password</label>
+        <input x-model="loginPassword" type="password" autocomplete="current-password"
+          class="w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••"
+          @keydown.enter="login()">
+      </div>
+
+      <!-- Error -->
+      <div x-show="loginError" class="text-xs text-red-400 text-center px-2 py-2 rounded-lg" style="background:rgba(239,68,68,0.08)" x-text="loginError"></div>
+
+      <button @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
+        class="btn-login w-full text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
+        <svg x-show="loginLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="loginLoading?'Signing in...':'Sign In'"></span>
+      </button>
+    </div>
+
+    <!-- Contact footer -->
+    <div x-show="tenant&&(tenant.contact_name||tenant.contact_phone||tenant.contact_email)" class="text-center mt-5 space-y-1">
+      <p class="text-xs font-medium" style="color:var(--muted)">Need access? Contact:</p>
+      <p class="text-xs font-semibold" style="color:var(--text)" x-text="tenant&&tenant.contact_name"></p>
+      <div class="flex items-center justify-center gap-3 text-xs" style="color:var(--muted)">
+        <a x-show="tenant&&tenant.contact_phone" :href="'tel:'+(tenant&&tenant.contact_phone)" class="hover:underline" x-text="tenant&&tenant.contact_phone"></a>
+        <a x-show="tenant&&tenant.contact_email" :href="'mailto:'+(tenant&&tenant.contact_email)" class="hover:underline" x-text="tenant&&tenant.contact_email"></a>
+      </div>
+      <p x-show="tenant&&tenant.contact_nmls" class="text-xs" style="color:var(--muted)">
+        NMLS# <span x-text="tenant&&tenant.contact_nmls"></span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- App (hidden while login is showing) -->
+<div x-show="!showLogin" x-cloak>
+
+<!-- Header -->
+<header class="card border-b border-gray-700/50 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-50">
+  <div class="flex items-center gap-2.5">
+    <div x-show="tenant&&tenant.logo_url" class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--navy-mid)">
+      <img :src="tenant&&tenant.logo_url" alt="Company logo" class="w-full h-full object-contain">
+    </div>
+    <div x-show="!tenant||!tenant.logo_url" class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--green)">
+      <svg class="w-4 h-4 sm:w-5 sm:h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+      </svg>
+    </div>
+    <div>
+      <h1 class="text-sm sm:text-base font-bold tracking-tight leading-tight" x-text="tenant&&tenant.company_name?tenant.company_name:'RE Investor Analyzer'"></h1>
+      <p class="text-xs hidden sm:block" style="color:var(--muted)" x-text="tenant&&tenant.tagline?tenant.tagline:'AI-powered property intelligence'"></p>
+    </div>
+  </div>
+  <div class="flex items-center gap-2">
+    <!-- Usage counter -->
+    <div x-show="currentUser" x-cloak class="hidden sm:flex items-center gap-1.5 text-xs px-2 py-1 rounded" style="background:var(--navy-mid);color:var(--muted)">
+      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+      <span x-text="usageCount+'/'+usageLimit+' today'"></span>
+    </div>
+    <div class="relative">
+      <button x-show="currentUser" x-cloak @click="historyOpen=!historyOpen; if(historyOpen) loadHistory()"
+        class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1" style="background:var(--navy-mid);color:var(--text)">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="hidden sm:inline">Previous reports</span>
+        <span class="sm:hidden">History</span>
+      </button>
+      <div x-show="historyOpen" x-cloak @click.outside="historyOpen=false"
+        class="absolute right-0 top-full mt-2 z-[60] w-[min(22rem,calc(100vw-1.5rem))] card rounded-xl border shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color:var(--border)">
+          <p class="text-sm font-semibold">Previous reports</p>
+          <button @click="loadHistory()" class="text-xs" style="color:var(--muted)">Refresh</button>
+        </div>
+        <div x-show="loadingHistory" class="p-5 text-center text-xs" style="color:var(--muted)">Loading...</div>
+        <div x-show="!loadingHistory&&reports.length===0" class="p-5 text-center text-xs" style="color:var(--muted)">No completed reports yet.</div>
+        <div x-show="!loadingHistory&&reports.length>0" class="max-h-80 overflow-y-auto">
+          <template x-for="report in reports" :key="report.id">
+            <button @click="loadReport(report)" class="w-full text-left px-4 py-3 border-b hover:bg-white/5" style="border-color:var(--border)">
+              <p class="text-sm font-medium truncate" x-text="report.address||'Untitled property'"></p>
+              <p class="text-xs mt-1" style="color:var(--muted)" x-text="formatReportDate(report.created_at)+' · '+report.analysis_type"></p>
+              <p class="text-xs mt-1 truncate" style="color:var(--muted)" x-text="'Buyer: '+(report.buyer_name||'—')"></p>
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <button x-show="hasResults && !analyzing" @click="exportPdf()" :disabled="exporting"
+      class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1" style="background:var(--navy-mid);color:var(--text)">
+      <svg x-show="!exporting" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      <svg x-show="exporting" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      <span class="hidden sm:inline" x-text="exporting?'Exporting...':'PDF'"></span>
+      <span class="sm:hidden">PDF</span>
+    </button>
+    <button x-show="hasResults" @click="clearResults()"
+      class="text-xs px-3 py-1.5 rounded-lg" style="background:var(--navy-mid);color:var(--muted)">Clear</button>
+    <div class="text-xs px-2 py-1 rounded" style="background:var(--navy-mid);color:var(--muted)">
+      <span x-show="!analyzing">Ready</span>
+      <span x-show="analyzing" class="flex items-center gap-1.5">
+        <span class="pulse-dot w-1.5 h-1.5 rounded-full inline-block" style="background:var(--green)"></span>
+        <span class="hidden sm:inline">Analyzing</span>
+      </span>
+    </div>
+    <!-- Sign out -->
+    <button x-show="currentUser" x-cloak @click="logout()"
+      class="text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style="background:var(--navy-mid);color:var(--muted)"
+      title="Sign out">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+      </svg>
+      <span class="hidden sm:inline">Sign Out</span>
+    </button>
+  </div>
+</header>
+
+<!-- Main -->
+<main class="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-5">
+
+  <!-- Input Card -->
+  <div class="card rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4">
+
+    <!-- Buyer contact -->
+    <div class="border-b pb-3 sm:pb-4" style="border-color:var(--border)">
+      <p class="text-xs font-semibold mb-2" style="color:var(--gold-light)">BUYER INFORMATION</p>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <div class="flex-1">
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Buyer Name <span class="text-red-400">*</span></label>
+          <input x-model="buyerName" type="text" autocomplete="name" class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="Jane Smith">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Buyer Email <span class="text-red-400">*</span></label>
+          <input x-model="buyerEmail" type="email" autocomplete="email" class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="jane@example.com">
+        </div>
+      </div>
+      <p class="text-xs mt-2" style="color:var(--muted)">The completed report will be sent to the buyer and your sponsoring partner.</p>
+    </div>
+
+    <!-- Address + Asking Price -->
+    <div class="flex flex-col sm:flex-row gap-3">
+      <div class="flex-1">
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">
+          <span x-text="analysisType==='compare'?'Property A Address':'Property Address'"></span>
+        </label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input x-model="streetAddress" type="text" autocomplete="street-address" autocorrect="off"
+            class="sm:col-span-2 w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="Street address">
+          <input x-model="city" type="text" autocomplete="address-level2"
+            class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="City">
+          <div class="grid grid-cols-2 gap-2">
+            <input x-model="state" type="text" autocomplete="address-level1" maxlength="2"
+              class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm uppercase" placeholder="State">
+            <input x-model="zip" type="text" autocomplete="postal-code" inputmode="numeric" maxlength="10"
+              class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="ZIP">
+          </div>
+        </div>
+      </div>
+      <div x-show="!['market','mortgage','compare','screen'].includes(analysisType)" class="sm:w-44 flex-shrink-0">
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Asking Price</label>
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium" style="color:var(--muted)">$</span>
+          <input x-model="askingPrice" type="text" inputmode="numeric"
+            class="w-full rounded-lg pl-7 pr-3 py-3 text-sm" placeholder="450,000"
+            @keydown.enter="!analyzing && canAnalyze() && analyze()">
+        </div>
+      </div>
+      <div x-show="analysisType==='compare'" class="flex-1">
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Property B Address</label>
+        <input x-model="address2" type="text" autocomplete="off"
+          class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="456 Other Street, City, ST 12345"
+          @keydown.enter="!analyzing && canAnalyze() && analyze()">
+      </div>
+    </div>
+
+    <!-- Rehab / Construction Cost -->
+    <div x-show="!['market','mortgage','compare','screen','neighborhood','listing'].includes(analysisType)"
+      class="flex flex-col sm:flex-row items-start gap-3 sm:items-center">
+      <div class="sm:w-56 flex-shrink-0">
+        <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">
+          Rehab / Construction Cost
+          <span class="font-normal ml-1" style="color:#4b5563">(optional)</span>
+        </label>
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium" style="color:var(--muted)">$</span>
+          <input x-model="rehabCost" type="text" inputmode="numeric"
+            class="w-full rounded-lg pl-7 pr-3 py-3 text-sm" placeholder="0"
+            @keydown.enter="!analyzing && canAnalyze() && analyze()">
+        </div>
+      </div>
+      <p class="text-xs leading-relaxed sm:pt-5" style="color:var(--muted)">
+        Your estimate to get the property rent-ready or sell-ready — factored into cost basis for all exit strategies.
+      </p>
+    </div>
+
+    <!-- Analysis Type Pills — horizontally scrollable on mobile -->
+    <div>
+      <label class="block text-xs font-medium mb-2" style="color:var(--muted)">Analysis Type</label>
+      <div class="pills-scroll">
+        <div class="flex gap-2" style="width:max-content">
+          <template x-for="mode in modes" :key="mode.id">
+            <button @click="analysisType=mode.id"
+              :class="['pill text-xs font-medium px-3 py-1.5 rounded-full', analysisType===mode.id?'active':'']"
+              x-text="mode.label"></button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mode description -->
+    <p class="text-xs rounded-lg px-3 py-2" style="background:var(--navy-mid);color:var(--muted)" x-text="getModeDesc()"></p>
+    <p x-show="deliveryMsg" class="text-xs rounded-lg px-3 py-2" style="background:rgba(34,197,94,.08);color:#86efac" x-text="deliveryMsg"></p>
+
+    <!-- Advanced Toggle -->
+    <div x-show="!['market','mortgage','compare','screen'].includes(analysisType)">
+      <button @click="showAdvanced=!showAdvanced" class="flex items-center gap-1.5 text-xs font-medium" style="color:var(--muted)">
+        <svg class="w-3.5 h-3.5 transition-transform" :class="showAdvanced?'rotate-180':''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+        <span x-text="showAdvanced?'Hide property details':'Add property details (optional)'"></span>
+      </button>
+      <div x-show="showAdvanced" x-transition class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        <div>
+          <label class="block text-xs mb-1" style="color:var(--muted)">Bedrooms</label>
+          <input x-model="beds" type="number" inputmode="numeric" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="3" min="0" max="20">
+        </div>
+        <div>
+          <label class="block text-xs mb-1" style="color:var(--muted)">Bathrooms</label>
+          <input x-model="baths" type="number" inputmode="decimal" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="2" min="0" max="20" step="0.5">
+        </div>
+        <div>
+          <label class="block text-xs mb-1" style="color:var(--muted)">Sq Ft</label>
+          <input x-model="sqft" type="text" inputmode="numeric" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="1850">
+        </div>
+        <div>
+          <label class="block text-xs mb-1" style="color:var(--muted)">Year Built</label>
+          <input x-model="yearBuilt" type="number" inputmode="numeric" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="1995" min="1800" max="2026">
+        </div>
+        <div class="col-span-2 sm:col-span-2">
+          <label class="block text-xs mb-1" style="color:var(--muted)">Property Type</label>
+          <select x-model="propertyType" class="w-full rounded-lg px-3 py-2.5 text-sm">
+            <option value="">Select type...</option>
+            <option>Single Family</option><option>Condo</option><option>Townhouse</option>
+            <option>Multi-Family (2-4)</option><option>Mobile/Manufactured</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs mb-1" style="color:var(--muted)">HOA/mo</label>
+          <input x-model="hoa" type="text" inputmode="numeric" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- Mortgage / Screen hints -->
+    <div x-show="analysisType==='screen'" class="text-xs rounded-lg px-3 py-2" style="background:var(--navy-mid);color:var(--muted)">
+      Describe what you're looking for above — e.g. "Phoenix AZ SFR under $400k, positive cash flow"
+    </div>
+
+    <!-- Desktop Analyze Button (hidden on mobile — sticky bar handles it) -->
+    <div class="hidden sm:flex items-center gap-3 pt-1">
+      <button @click="analyze()" :disabled="analyzing||!canAnalyze()"
+        class="btn-analyze text-white font-semibold px-6 py-2.5 rounded-lg text-sm flex items-center gap-2">
+        <svg x-show="!analyzing" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        <svg x-show="analyzing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="analyzing?'Analyzing...':'Analyze Property'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div x-show="hasResults||analyzing" id="pdf-content" class="space-y-3 sm:space-y-4 fade-in">
+
+    <!-- Partner-branded report header included in PDF exports -->
+    <div class="rounded-xl p-5 sm:p-7 text-center" style="background:#f8fafc;border:1px solid #e2e8f0">
+      <img x-show="tenant&&tenant.logo_url" :src="tenant&&tenant.logo_url" alt="Partner logo" class="mx-auto mb-3 h-12 max-w-52 object-contain">
+      <p class="text-2xl sm:text-3xl font-bold leading-tight" style="color:#1e293b" x-text="tenant&&tenant.company_name?tenant.company_name:'your mortgage partner'"></p>
+      <p class="mt-2 text-lg sm:text-xl font-semibold leading-tight" style="color:#475569" x-text="tenant&&tenant.tagline?tenant.tagline:'AI-powered property intelligence'"></p>
+      <p class="mt-2 text-sm" style="color:#64748b">This Property Analysis is brought to you by <strong x-text="tenant&&tenant.company_name?tenant.company_name:'your mortgage partner'"></strong></p>
+      <p class="mt-1 text-xs" style="color:#64748b">
+        <span x-show="tenant&&tenant.contact_phone" x-text="tenant&&tenant.contact_phone"></span>
+        <span x-show="tenant&&tenant.contact_phone&&tenant.contact_email"> · </span>
+        <span x-show="tenant&&tenant.contact_email" x-text="tenant&&tenant.contact_email"></span>
+      </p>
+    </div>
+
+    <!-- Suggested Offer Banner -->
+    <div x-show="scoreData&&scoreData.key_metrics&&scoreData.key_metrics.suggested_offer"
+      class="rounded-xl p-4 sm:p-5"
+      style="background:linear-gradient(135deg,#1a2e1f 0%,#1a2332 100%);border:1px solid #2d8a4e">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--green)">
+          <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <span class="text-xs font-semibold uppercase tracking-wide" style="color:#4ade80">Suggested Offer</span>
+      </div>
+      <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-6">
+        <div x-show="scoreData?.key_metrics?.asking_price&&scoreData.key_metrics.asking_price!=='null'">
+          <p class="text-xs" style="color:var(--muted)">Asking Price</p>
+          <p class="text-lg font-bold" style="color:var(--text)" x-text="scoreData?.key_metrics?.asking_price"></p>
+        </div>
+        <div>
+          <p class="text-xs" style="color:var(--muted)">Suggested Offer</p>
+          <p class="text-2xl font-bold" style="color:#4ade80" x-text="scoreData?.key_metrics?.suggested_offer"></p>
+        </div>
+        <div x-show="scoreData?.key_metrics?.offer_vs_asking&&scoreData.key_metrics.offer_vs_asking!=='N/A'">
+          <p class="text-xs" style="color:var(--muted)">vs Asking</p>
+          <p class="text-lg font-bold" style="color:var(--gold-light)" x-text="scoreData?.key_metrics?.offer_vs_asking"></p>
+        </div>
+        <div x-show="scoreData?.key_metrics?.price_vs_comps">
+          <p class="text-xs" style="color:var(--muted)">vs Comps</p>
+          <p class="text-lg font-bold" style="color:var(--text)" x-text="scoreData?.key_metrics?.price_vs_comps"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Score Dashboard -->
+    <div x-show="scoreData!==null" class="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
+
+      <!-- Score Gauge — horizontal layout on mobile -->
+      <div class="card rounded-xl p-4 sm:p-5 flex items-center sm:flex-col sm:items-center gap-4 sm:gap-0">
+        <div class="relative w-24 h-24 sm:w-36 sm:h-36 flex-shrink-0 sm:mb-0">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle class="score-ring-bg" cx="60" cy="60" r="50" fill="none" stroke-width="10"/>
+            <circle class="score-ring-fill" :class="scoreRingClass()" cx="60" cy="60" r="50" fill="none" stroke-width="10"
+              :stroke-dasharray="scoreDash()" stroke-dashoffset="0"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-3xl sm:text-4xl font-bold" :style="'color:'+scoreColor()" x-text="scoreData?scoreData.property_score:''"></span>
+            <span class="text-lg sm:text-xl font-bold -mt-1" :style="'color:'+scoreColor()" x-text="scoreData?scoreData.grade:''"></span>
+          </div>
+        </div>
+        <div class="flex-1 sm:text-center sm:mt-2">
+          <p class="text-xs font-medium mb-0.5" style="color:var(--muted)">PROPERTY SCORE</p>
+          <p class="text-base sm:text-sm font-semibold" x-text="scoreData?scoreData.signal:''"></p>
+          <p class="text-xs mt-1 leading-relaxed" style="color:var(--muted)" x-text="scoreData?scoreData.recommendation:''"></p>
+        </div>
+      </div>
+
+      <!-- Category Breakdown -->
+      <div class="card rounded-xl p-4 sm:p-5">
+        <p class="text-xs font-medium mb-3" style="color:var(--muted)">CATEGORY BREAKDOWN</p>
+        <div class="space-y-2.5" x-show="scoreData&&scoreData.scores">
+          <template x-for="cat in getCategories()" :key="cat.key">
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span style="color:var(--muted)" x-text="cat.label"></span>
+                <span style="color:var(--text)" x-text="(cat.value||0)+'/100'"></span>
+              </div>
+              <div class="rounded-full h-2 overflow-hidden" style="background:var(--navy-mid)">
+                <div class="bar-fill h-full rounded-full" :style="'width:'+(cat.value||0)+'%;background:'+barColor(cat.value)"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Key Metrics — 2 column grid on mobile -->
+      <div class="card rounded-xl p-4 sm:p-5">
+        <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY METRICS</p>
+        <div class="grid grid-cols-2 sm:grid-cols-1 gap-x-4 gap-y-2.5" x-show="scoreData&&scoreData.key_metrics">
+          <template x-for="m in getMetrics()" :key="m.label">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+              <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
+              <span class="text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Finance Section -->
+    <div x-show="getPropertyPrice() > 0" class="card rounded-xl p-4 sm:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--navy-mid)">
+            <svg class="w-4 h-4" style="color:var(--gold)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Financing Estimate</p>
+            <p class="text-xs" style="color:var(--muted)">Based on <span x-text="formatCurrency(getPropertyPrice())"></span></p>
+          </div>
+        </div>
+        <!-- Rate editor -->
+        <div class="flex items-center gap-2">
+          <span class="text-xs" style="color:var(--muted)">30yr Rate:</span>
+          <div class="flex items-center gap-1 rounded-lg p-1" style="background:var(--navy-mid);border:1px solid var(--border)">
+            <div class="flex flex-col">
+              <button type="button" @click="interestRate = Math.min(20, (parseFloat(interestRate) || 0) + 0.25)" class="w-5 h-4 flex items-center justify-center rounded text-[10px] leading-none font-bold" style="background:rgba(148,163,184,.12);color:var(--text)">▲</button>
+              <button type="button" @click="interestRate = Math.max(1, (parseFloat(interestRate) || 0) - 0.25)" class="w-5 h-4 flex items-center justify-center rounded text-[10px] leading-none font-bold" style="background:rgba(148,163,184,.12);color:var(--text)">▼</button>
+            </div>
+            <div class="relative">
+              <input x-model="interestRate" type="number" step="0.05" min="1" max="20"
+                class="w-20 rounded-lg px-2 py-1.5 text-sm text-center font-semibold"
+                style="background:transparent;border:none;color:var(--text)">
+              <span class="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style="color:var(--muted)">%</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-xs">
+          <label class="flex items-center gap-2" style="color:var(--muted)">
+            Down payment
+            <input x-model="downPaymentPercent" type="number" step="0.5" min="0" max="99" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <span>%</span>
+          </label>
+          <label class="flex items-center gap-2" style="color:var(--muted)">
+            Property tax
+            <input x-model="propertyTaxRate" type="number" step="0.01" min="0" max="10" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <span>% / yr</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Adjustable financing scenario -->
+      <div class="grid grid-cols-1 gap-3 sm:gap-4">
+        <template x-for="scenario in getFinanceScenarios()" :key="scenario.label">
+          <div class="rounded-xl p-3 sm:p-4" style="background:var(--navy-mid)">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-bold" style="color:var(--gold-light)" x-text="scenario.label + ' Down'"></span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full" style="background:var(--navy-light);color:var(--text)" x-text="formatCurrency(scenario.downPayment)"></span>
+            </div>
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span style="color:var(--muted)">Loan Amount</span>
+                <span style="color:var(--text);font-weight:500" x-text="formatCurrency(scenario.loanAmount)"></span>
+              </div>
+              <div class="h-px" style="background:var(--border)"></div>
+              <div class="flex justify-between text-xs">
+                <span style="color:var(--muted)">Principal & Interest</span>
+                <span style="color:var(--text)" x-text="formatCurrency(scenario.pi) + '/mo'"></span>
+              </div>
+              <div class="flex justify-between text-xs">
+                <span style="color:var(--muted)">Property Tax (est.)</span>
+                <span style="color:var(--text)" x-text="formatCurrency(scenario.tax) + '/mo'"></span>
+              </div>
+              <div class="flex justify-between text-xs">
+                <span style="color:var(--muted)">Homeowners Ins. (est.)</span>
+                <span style="color:var(--text)" x-text="formatCurrency(scenario.insurance) + '/mo'"></span>
+              </div>
+              <div x-show="scenario.pmi > 0" class="flex justify-between text-xs">
+                <span style="color:#f97316">PMI</span>
+                <span style="color:#f97316" x-text="formatCurrency(scenario.pmi) + '/mo'"></span>
+              </div>
+              <div x-show="scenario.hoa > 0" class="flex justify-between text-xs">
+                <span style="color:var(--muted)">HOA</span>
+                <span style="color:var(--text)" x-text="formatCurrency(scenario.hoa) + '/mo'"></span>
+              </div>
+              <div class="h-px" style="background:var(--border)"></div>
+              <div class="flex justify-between text-sm font-bold">
+                <span style="color:var(--text)">Total PITI</span>
+                <span style="color:var(--green-light)" x-text="formatCurrency(scenario.piti) + '/mo'"></span>
+              </div>
+              <div class="flex justify-between text-xs">
+                <span style="color:var(--muted)">Closing Costs (~3%)</span>
+                <span style="color:var(--text)" x-text="formatCurrency(scenario.closingCosts)"></span>
+              </div>
+              <div x-show="scenario.rehabCost > 0" class="flex justify-between text-xs">
+                <span style="color:#f97316">Rehab Budget</span>
+                <span style="color:#f97316" x-text="formatCurrency(scenario.rehabCost)"></span>
+              </div>
+              <div class="flex justify-between text-sm font-bold pt-0.5 border-t" style="border-color:var(--border)">
+                <span style="color:var(--text)">Total Cash Needed</span>
+                <span style="color:var(--gold-light)" x-text="formatCurrency(scenario.cashToClose)"></span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <p class="text-xs mt-3" style="color:var(--muted)">
+        Tax at <span x-text="propertyTaxRate+'%'"></span> annually · Insurance at 0.5% · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
+      </p>
+
+      <!-- ── DSCR Investment Loan Card ──────────────────────────────── -->
+      <div x-show="getDSCRCard()" class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
+        <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style="background:var(--navy-mid)">
+          <div class="flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              :style="getDSCRCard()?.comfortable?'background:rgba(34,197,94,.2)':getDSCRCard()?.qualifies?'background:rgba(201,152,46,.2)':'background:rgba(239,68,68,.2)'">
+              <svg class="w-4 h-4" :style="getDSCRCard()?.comfortable?'color:#4ade80':getDSCRCard()?.qualifies?'color:#e0b043':'color:#f87171'"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+            </div>
+            <div>
+              <p class="text-xs font-semibold" style="color:var(--gold-light)">DSCR Investment Loan</p>
+              <p class="text-xs" style="color:var(--muted)">Qualified on property cash flow · 25% down ·
+                <span x-text="getDSCRCard()?.dscrRate+'%'"></span> rate</p>
+            </div>
+          </div>
+          <!-- DSCR ratio + badge -->
+          <div class="flex items-center gap-3">
+            <div class="text-right">
+              <p class="text-2xl font-bold leading-none"
+                :style="getDSCRCard()?.comfortable?'color:#4ade80':getDSCRCard()?.qualifies?'color:#e0b043':'color:#f87171'"
+                x-text="getDSCRCard()?.dscr"></p>
+              <p class="text-xs mt-0.5" style="color:var(--muted)">DSCR ratio</p>
+            </div>
+            <span class="text-xs px-2.5 py-1 rounded-full font-semibold"
+              :style="getDSCRCard()?.comfortable?'background:rgba(34,197,94,.15);color:#4ade80':getDSCRCard()?.qualifies?'background:rgba(201,152,46,.15);color:#e0b043':'background:rgba(239,68,68,.15);color:#f87171'"
+              x-text="getDSCRCard()?.comfortable?'✓ Qualifies (≥1.25)':getDSCRCard()?.qualifies?'Borderline (1.0–1.24)':'Does Not Qualify (<1.0)'"></span>
+          </div>
+        </div>
+
+        <div class="px-4 py-3 flex flex-wrap items-center gap-3 border-t" style="border-color:var(--border)">
+          <label class="flex items-center gap-2 text-xs" style="color:var(--muted)">
+            Average monthly rent
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="rentOverride" type="number" min="0" step="50" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></span>
+          </label>
+          <span class="text-xs" style="color:var(--muted)">Adjusts the cash-flow and DSCR figures below.</span>
+        </div>
+
+        <!-- Metrics row -->
+        <div class="grid grid-cols-2 sm:grid-cols-4" style="border-top:1px solid var(--border)">
+          <div class="p-3 sm:p-4" style="border-right:1px solid var(--border)">
+            <p class="text-xs mb-1" style="color:var(--muted)">Est. Monthly Rent</p>
+            <p class="text-sm font-semibold" x-text="formatCurrency(getDSCRCard()?.monthlyRent)"></p>
+            <p class="text-xs" style="color:var(--muted)">Gross income</p>
+          </div>
+          <div class="p-3 sm:p-4" style="border-right:1px solid var(--border)">
+            <p class="text-xs mb-1" style="color:var(--muted)">Monthly NOI</p>
+            <p class="text-sm font-semibold" x-text="formatCurrency(getDSCRCard()?.monthlyNOI)"></p>
+            <p class="text-xs" style="color:var(--muted)">After vacancy & expenses</p>
+          </div>
+          <div class="p-3 sm:p-4" style="border-right:1px solid var(--border)">
+            <p class="text-xs mb-1" style="color:var(--muted)">Debt Service</p>
+            <p class="text-sm font-semibold" x-text="formatCurrency(getDSCRCard()?.monthlyPI)+'/mo'"></p>
+            <p class="text-xs" style="color:var(--muted)" x-text="formatCurrency(getDSCRCard()?.downPayment)+' down'"></p>
+          </div>
+          <div class="p-3 sm:p-4">
+            <p class="text-xs mb-1" style="color:var(--muted)">Monthly Cash Flow</p>
+            <p class="text-sm font-semibold"
+              :style="(getDSCRCard()?.monthlyCashFlow||0)>=0?'color:#4ade80':'color:#f87171'"
+              x-text="formatCurrency(getDSCRCard()?.monthlyCashFlow)+'/mo'"></p>
+            <p class="text-xs" style="color:var(--muted)">NOI minus debt service</p>
+          </div>
+        </div>
+
+        <div class="px-4 py-2 text-xs" style="background:var(--navy-deep);color:var(--muted)">
+          DSCR = Annual NOI ÷ Annual Debt Service · Lenders typically require ≥1.25 · Assumes 8% vacancy · 10% mgmt · 5% maintenance/CapEx
+        </div>
+      </div>
+
+      <div x-show="!getDSCRCard() && getPropertyPrice() > 0" class="mt-4 text-xs text-center py-3 rounded-xl" style="background:var(--navy-mid);color:var(--muted)">
+        Run a <strong style="color:var(--text)">Full Analysis</strong> or <strong style="color:var(--text)">Rental Income</strong> analysis to see DSCR qualification
+      </div>
+
+    </div>
+
+    <!-- Investment Analysis -->
+    <div x-ref="investmentCardAnchor"></div>
+    <div x-show="getPropertyPrice() > 0" x-ref="investmentCard" class="card rounded-xl p-4 sm:p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--navy-mid)">
+          <svg class="w-4 h-4" style="color:var(--gold-light)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 18h16M7 14l3-3 3 2 4-6 3 2"/>
+          </svg>
+        </div>
+        <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Investment Analysis</p>
+      </div>
+
+      <div class="mb-4 rounded-xl p-3" style="border:1px solid var(--border);background:var(--navy-mid)">
+        <p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--muted)">Additional Strategy</p>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-base font-bold" style="color:var(--text)">Land Contract Sale</p>
+            <p class="text-xs" style="color:var(--muted)">Seller-financed exit · You hold the note · Buyer pays PITI to you</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs" style="color:var(--muted)">Sale Price:</span>
+            <input x-model="landContractSalePrice" type="number" min="0" step="1000" class="w-28 rounded-lg px-2 py-1.5 text-sm text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)" placeholder="Market value">
+            <span class="text-xs" style="color:var(--muted)">Down:</span>
+            <input x-model="landContractDownPayment" type="number" step="0.5" min="0" max="99" class="w-16 rounded-lg px-2 py-1.5 text-sm text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <span class="text-xs" style="color:var(--muted)">%</span>
+            <span class="text-xs" style="color:var(--muted)">Rate:</span>
+            <div class="relative">
+              <input x-model="landContractRate" type="number" step="0.25" min="4" max="20"
+                class="w-20 rounded-lg px-2 py-1.5 text-sm text-center font-semibold"
+                style="background:var(--navy-mid);border:1px solid var(--border)">
+              <span class="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style="color:var(--muted)">%</span>
+            </div>
+            <span class="text-xs" style="color:var(--muted)">Term:</span>
+            <input x-model="landContractTermYears" type="number" min="1" max="40" step="1" class="w-16 rounded-lg px-2 py-1.5 text-sm text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <span class="text-xs" style="color:var(--muted)">yrs</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div class="rounded-xl p-3" style="background:var(--navy-mid)">
+          <p class="text-xs mb-1" style="color:var(--muted)">Sale Price</p>
+          <p class="text-base font-bold" style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.salePrice)"></p>
+          <p class="text-xs" style="color:var(--muted)">Market value</p>
+        </div>
+        <div class="rounded-xl p-3" style="background:var(--navy-mid)">
+          <p class="text-xs mb-1" style="color:var(--muted)">Down Payment In</p>
+          <p class="text-base font-bold" style="color:#4ade80" x-text="formatCurrency(getLandContractCard()?.downPayment)"></p>
+          <p class="text-xs" style="color:var(--muted)" x-text="(parseFloat(landContractDownPayment)||0)+'% at closing'"></p>
+        </div>
+        <div class="rounded-xl p-3" style="background:var(--navy-mid)">
+          <p class="text-xs mb-1" style="color:var(--muted)">Note You Carry</p>
+          <p class="text-base font-bold" style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.loanAmount)"></p>
+          <p class="text-xs" style="color:var(--muted)" x-text="(100-(parseFloat(landContractDownPayment)||0))+'% financed'"></p>
+        </div>
+        <div class="rounded-xl p-3" style="background:linear-gradient(135deg,#1a2e1f,#1a2332);border:1px solid rgba(45,138,78,.4)">
+          <p class="text-xs mb-1" style="color:var(--muted)">Yr 1 Interest Revenue</p>
+          <p class="text-base font-bold" style="color:#4ade80" x-text="formatCurrency(getLandContractCard()?.monthlyInterestYr1)+'/mo'"></p>
+          <p class="text-xs" style="color:var(--muted)" x-text="getLandContractCard()?.firstYearInterestYield+'% of note balance'"></p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="rounded-xl p-4" style="background:var(--navy-mid)">
+          <p class="text-xs font-semibold uppercase tracking-wide mb-3" style="color:var(--muted)">Buyer's Monthly Payment to You</p>
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Principal & Interest</span>
+              <span style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.monthlyPI)+'/mo'"></span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Property Tax (escrowed)</span>
+              <span style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.monthlyTax)+'/mo'"></span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Homeowners Ins. (escrowed)</span>
+              <span style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.monthlyInsurance)+'/mo'"></span>
+            </div>
+            <div class="h-px" style="background:var(--border)"></div>
+            <div class="flex justify-between text-sm font-bold">
+              <span style="color:var(--text)">Total PITI</span>
+              <span style="color:var(--green-light)" x-text="formatCurrency(getLandContractCard()?.totalMonthly)+'/mo'"></span>
+            </div>
+            <div class="flex justify-between text-xs pt-1" style="border-top:1px dashed var(--border)">
+              <span style="color:var(--muted)">Of which: your interest revenue</span>
+              <span style="color:#4ade80" x-text="'~'+formatCurrency(getLandContractCard()?.monthlyInterestYr1)+'/mo (Yr 1)'"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-xl p-4" style="background:var(--navy-mid)">
+          <p class="text-xs font-semibold uppercase tracking-wide mb-3" style="color:var(--muted)">Your Return Analysis</p>
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Cost Basis (purchase + rehab)</span>
+              <span style="color:var(--text)" x-text="formatCurrency(getLandContractCard()?.costBasis)"></span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Sale Price vs. Basis</span>
+              <span :style="(getLandContractCard()?.equitySpread||0)>=0?'color:#4ade80;font-weight:600':'color:#f87171'"
+                x-text="((getLandContractCard()?.equitySpread||0)>=0?'+':'')+formatCurrency(getLandContractCard()?.equitySpread)"></span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Total Interest Earned (30 yr)</span>
+              <span class="text-right" style="color:#4ade80"><span x-text="formatCurrency(getLandContractCard()?.totalInterestEarned)"></span><br><span class="text-xs" style="color:var(--muted)" x-text="getLandContractCard()?.annualInterestYield+'% annualized on note'"></span></span>
+            </div>
+            <div class="h-px" style="background:var(--border)"></div>
+            <div class="flex justify-between text-sm font-bold">
+              <span style="color:var(--text)">Total Capital Recovered</span>
+              <span style="color:#4ade80" x-text="formatCurrency(getLandContractCard()?.totalReturn)"></span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span style="color:var(--muted)">Total Profit</span>
+              <span class="text-right" :style="(getLandContractCard()?.totalProfit||0)>=0?'color:#4ade80':'color:#f87171'"><span x-text="formatCurrency(getLandContractCard()?.totalProfit)"></span><br><span class="text-xs" style="color:var(--muted)" x-text="getLandContractCard()?.annualizedReturn+'% annualized return'"></span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs mt-3" style="color:var(--muted)">
+        You retain title until the note is paid in full · Buyer pays all PITI to you monthly · Tax &amp; insurance escrowed and passed through · Interest income declines as principal amortizes
+      </p>
+    </div>
+
+    <!-- Key Findings & Red Flags -->
+    <div x-show="scoreData&&(scoreData.red_flags?.length||scoreData.key_findings?.length)" class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+      <div x-show="scoreData&&scoreData.key_findings?.length" class="card rounded-xl p-4 sm:p-5">
+        <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY FINDINGS</p>
+        <ul class="space-y-2">
+          <template x-for="f in (scoreData?scoreData.key_findings:[])" :key="f">
+            <li class="flex gap-2 text-sm">
+              <svg class="w-4 h-4 mt-0.5 flex-shrink-0" style="color:var(--green)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span style="color:#cbd5e1" x-text="f"></span>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <div x-show="scoreData&&scoreData.red_flags?.length" class="card rounded-xl p-4 sm:p-5">
+        <p class="text-xs font-medium mb-3" style="color:#ef4444">RED FLAGS</p>
+        <ul class="space-y-2">
+          <template x-for="f in (scoreData?scoreData.red_flags:[])" :key="f">
+            <li class="flex gap-2 text-sm">
+              <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <span style="color:#fca5a5" x-text="f"></span>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Analysis status and completed report -->
+    <div class="card rounded-xl p-4 sm:p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <p class="text-xs font-medium" style="color:var(--muted)">DETAILED ANALYSIS</p>
+        <span x-show="analyzing" class="flex items-center gap-1.5 text-xs" style="color:var(--green)">
+          <span class="pulse-dot w-1.5 h-1.5 rounded-full inline-block" style="background:var(--green)"></span>
+          Working...
+        </span>
+      </div>
+      <div x-show="analyzing" class="py-8 sm:py-12 text-center">
+        <div class="status-icon w-16 h-16 mx-auto rounded-2xl flex items-center justify-center" style="background:rgba(45,138,78,.16);color:var(--green)">
+          <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 3v3m0 12v3M3 12h3m12 0h3m-3.64-6.36l-2.12 2.12m-8.48 8.48l-2.12 2.12m0-12.72l2.12 2.12m8.48 8.48l2.12 2.12M9 9l6 6m0-6l-6 6"/>
+          </svg>
+        </div>
+        <p class="mt-5 text-lg font-semibold" style="color:var(--text)" x-text="analysisStatuses[statusIndex].label"></p>
+        <p class="mt-1 text-sm" style="color:var(--muted)" x-text="analysisStatuses[statusIndex].detail"></p>
+        <div class="h-1.5 max-w-sm mx-auto mt-6 rounded-full overflow-hidden" style="background:var(--navy-mid)">
+          <div class="status-progress h-full rounded-full" style="background:var(--green)"></div>
+        </div>
+        <p class="mt-3 text-xs" style="color:var(--muted)">Building your property report</p>
+      </div>
+      <div x-show="!analyzing&&displayText.length>0" class="stream-content text-sm leading-relaxed" x-html="renderMarkdown(displayText)"></div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div class="disclaimer px-4 py-3 rounded-lg" style="background:var(--navy)">
+      <p>DISCLAIMER: For educational and research purposes only. Not financial or investment advice. All estimates are AI-generated approximations. Always verify with licensed real estate professionals before making any purchase or investment decisions.</p>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div x-show="errorMsg" class="card rounded-xl p-4 sm:p-5 border border-red-900/50 flex gap-3">
+    <svg class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div>
+      <p class="text-sm font-medium text-red-300">Analysis Error</p>
+      <p class="text-sm text-red-400 mt-1" x-text="errorMsg"></p>
+      <p class="text-xs mt-2" style="color:var(--muted)">Check that the server is running and your ANTHROPIC_API_KEY is set in .env</p>
+    </div>
+  </div>
+
+  <!-- Empty State -->
+  <div x-show="!hasResults&&!analyzing&&!errorMsg" class="text-center py-12 sm:py-16 space-y-3">
+    <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl mx-auto flex items-center justify-center" style="background:var(--navy)">
+      <svg class="w-7 h-7 sm:w-8 sm:h-8" style="color:var(--muted)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+    </div>
+    <p class="font-medium" style="color:var(--muted)">Enter an address to begin</p>
+    <p class="text-sm max-w-xs mx-auto" style="color:#4b5563">Choose an analysis type, enter an address, and tap Analyze.</p>
+  </div>
+
+  <!-- Spacer so content clears sticky bar on mobile -->
+  <div class="mobile-spacer"></div>
+
+</main>
+
+<!-- Mobile Sticky Bottom Bar -->
+<div class="sticky-bar sm:hidden">
+  <button @click="analyze()" :disabled="analyzing||!canAnalyze()"
+    class="btn-analyze text-white font-semibold w-full py-3.5 rounded-xl text-sm flex items-center justify-center gap-2">
+    <svg x-show="!analyzing" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+    </svg>
+    <svg x-show="analyzing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    <span x-text="analyzing?'Analyzing...':'Analyze Property'"></span>
+  </button>
+</div>
+
+</div><!-- end app wrapper -->
+
+<!-- AI Help -->
+<div x-show="helpOpen" x-cloak class="fixed bottom-5 right-5 z-[55] w-[min(92vw,380px)] card rounded-xl shadow-2xl overflow-hidden">
+  <div class="px-4 py-3 flex items-center justify-between" style="background:var(--navy-mid)">
+    <div><p class="text-sm font-semibold">PropMind Help</p><p class="text-xs" style="color:var(--muted)">Ask about this property portal</p></div>
+    <button @click="helpOpen=false" class="text-lg leading-none" style="color:var(--muted)" aria-label="Close help">&times;</button>
+  </div>
+  <div class="p-3 max-h-80 overflow-y-auto space-y-3" x-ref="helpMessages">
+    <div class="text-xs rounded-lg p-3" style="background:var(--navy-mid);color:var(--muted)">I can explain analyses, reports, tokens, and investment metrics.</div>
+    <template x-for="item in helpMessages" :key="item.id">
+      <div class="text-sm rounded-lg p-3" :style="item.role==='user'?'background:var(--green);color:white;margin-left:2rem':'background:var(--navy-mid);color:var(--text);margin-right:1rem'" x-text="item.content"></div>
+    </template>
+    <div x-show="helpLoading" class="text-xs" style="color:var(--muted)">Thinking...</div>
+  </div>
+  <div class="px-3 pb-3 space-y-2">
+    <div class="flex flex-wrap gap-1.5"><template x-for="prompt in helpPrompts" :key="prompt"><button @click="askHelp(prompt)" class="text-xs px-2 py-1 rounded" style="background:var(--navy-mid);color:var(--muted)" x-text="prompt"></button></template></div>
+    <div class="flex gap-2"><input x-model="helpInput" @keydown.enter="askHelp()" class="flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Ask a question..." aria-label="Help question"><button @click="askHelp()" :disabled="helpLoading||!helpInput.trim()" class="btn-analyze px-3 rounded-lg text-sm text-white">Send</button></div>
+    <a href="mailto:support@propmind.ai" class="block text-center text-xs hover:underline" style="color:#93c5fd">Contact PropMind Support: support@propmind.ai</a>
+  </div>
+</div>
+<button x-show="currentUser" x-cloak @click="helpOpen=!helpOpen" class="fixed bottom-20 sm:bottom-5 right-5 z-[50] rounded-full px-4 py-3 shadow-lg text-sm font-semibold" style="background:var(--green);color:white" aria-label="Open AI Help">? Help</button>
+
+<script>
+// Wrap markdown tables in scrollable div for mobile
+marked.use({
+  renderer: {
+    table(header, body) {
+      return `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+    }
+  }
+});
+
+function app() {
+  // Resolve slug synchronously so Alpine's first render shows the right screen
+  const _parts = location.pathname.split('/').filter(Boolean);
+  const _slug  = (_parts[0] && _parts[0] !== 'super') ? _parts[0] : '';
+
+  return {
+    // ── Auth state ──────────────────────────────────────────────────
+    token: null, currentUser: null, tenant: null,
+    slug: _slug,
+    showLogin: !!_slug,   // login shown immediately on tenant URLs — no blank flash
+    loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
+    usageCount: 0, usageLimit: 5,
+    reports: [], historyOpen: false, loadingHistory: false,
+    // ── Analysis state ──────────────────────────────────────────────
+    buyerName:'', buyerEmail:'', deliveryMsg:'',
+    address:'', streetAddress:'', city:'', state:'', zip:'', address2:'', analysisType:'full', askingPrice:'', rehabCost:'',
+    price:'', beds:'', baths:'', sqft:'', yearBuilt:'', propertyType:'', hoa:'',
+    showAdvanced: false,
+    analyzing: false, exporting: false, hasResults: false,
+    errorMsg: '', streamText: '', scoreData: null,
+    helpOpen: false, helpInput: '', helpLoading: false, helpMessages: [],
+    helpPrompts: ['How do I run an analysis?', 'What does DSCR mean?', 'How do my tokens work?'],
+    interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2,
+    rentOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
+    landContractRate: 8.0, landContractTermYears: 30,
+    statusIndex: 0, statusTimer: null,
+    analysisStatuses: [
+      { label:'Connecting to market data', detail:'Gathering current property and neighborhood information' },
+      { label:'Pulling in property information', detail:'Reviewing public records, listings, and comparable sales' },
+      { label:'Building the financial picture', detail:'Calculating income, expenses, financing, and returns' },
+      { label:'Reading public data', detail:'Checking schools, amenities, trends, and local conditions' },
+      { label:'Making exit suggestions', detail:'Comparing strategies and shaping the clearest next steps' },
+    ],
+
+    modes: [
+      { id:'full',         label:'Full Analysis',     desc:'Complete 5-dimensional analysis: comps, rental, investment, neighborhood, and market conditions' },
+      { id:'quick',        label:'Quick Score',       desc:'Fast 60-second property score — top metrics only, no deep dive' },
+      { id:'comps',        label:'Comps',             desc:'Comparable sales analysis to determine fair market value' },
+      { id:'rental',       label:'Rental Income',     desc:'Rental income, vacancy, cap rate, and cash flow analysis' },
+      { id:'invest',       label:'Investment',        desc:'Buy-hold, BRRRR, flip, and STR investment strategy analysis' },
+      { id:'neighborhood', label:'Neighborhood',      desc:'Schools, safety, walkability, amenities, and quality of life' },
+      { id:'market',       label:'Market',            desc:'Supply/demand, price trends, economic drivers, and 2-year outlook' },
+      { id:'flip',         label:'Fix & Flip',        desc:'70% rule analysis, ARV, rehab estimate, and flip profit projection' },
+      { id:'mortgage',     label:'Mortgage',          desc:'Payment breakdowns, down payment scenarios, DTI, and affordability' },
+      { id:'compare',      label:'Compare',           desc:'Side-by-side comparison of two properties' },
+      { id:'listing',      label:'Listing',           desc:'Analyze an active listing — price history, seller motivation' },
+      { id:'screen',       label:'Deal Screener',     desc:'Screen for investment opportunities matching your criteria' },
+    ],
+
+    async init() {
+      marked.setOptions({ breaks: true, gfm: true });
+
+      // Load tenant branding (slug already set synchronously in app())
+      if (this.slug) {
+        try {
+          const r = await fetch(`/api/tenant/${this.slug}`);
+          if (r.ok) {
+            this.tenant = await r.json();
+            if (this.tenant.primary_color) {
+              document.documentElement.style.setProperty('--brand', this.tenant.primary_color);
+              document.documentElement.style.setProperty('--green', this.tenant.primary_color);
+            }
+            if (this.tenant.company_name) {
+              document.title = this.tenant.company_name + ' — Property Analyzer';
+            }
+          }
+        } catch(e) {}
+      }
+
+      // Auto-login if a valid JWT is saved
+      const saved = localStorage.getItem('re_token');
+      if (saved) {
+        try {
+          const r = await fetch('/api/me', { headers: { Authorization: `Bearer ${saved}` } });
+          if (r.ok) {
+            this.token = saved;
+            this.currentUser = await r.json();
+            this.showLogin = false;   // hide login, show app
+            await this.fetchUsage();
+            await this.loadHistory();
+            return;
+          }
+        } catch(e) {}
+        localStorage.removeItem('re_token');
+      }
+      // showLogin was already set correctly in app() — nothing more to do
+    },
+
+    async askHelp(prompt='') {
+      const question = (prompt || this.helpInput).trim();
+      if (!question || this.helpLoading) return;
+      this.helpInput = ''; this.helpMessages.push({ id: Date.now(), role:'user', content:question });
+      this.helpLoading = true;
+      try {
+        const context = `Analysis type: ${this.analysisType}; Address: ${this.address || 'not entered'}; Results available: ${this.hasResults}; Token balance: ${this.currentUser?.token_balance ?? 'unknown'}; Usage: ${this.usageCount}/${this.usageLimit}`;
+        const r = await fetch('/api/help', { method:'POST', headers:{'Authorization':`Bearer ${this.token}`, 'Content-Type':'application/json'}, body:JSON.stringify({ message:question, history:this.helpMessages.slice(-8), page:'agent analyzer', page_context:context }) });
+        const data = await r.json();
+        this.helpMessages.push({ id:Date.now()+1, role:'assistant', content:r.ok ? data.answer : (data.detail || 'Help is temporarily unavailable.') });
+      } catch(e) { this.helpMessages.push({ id:Date.now()+1, role:'assistant', content:'Help is temporarily unavailable. Please try again.' }); }
+      finally { this.helpLoading = false; this.$nextTick(() => { if(this.$refs.helpMessages) this.$refs.helpMessages.scrollTop = this.$refs.helpMessages.scrollHeight; }); }
+    },
+
+    async login() {
+      if (this.loginLoading || !this.loginEmail || !this.loginPassword) return;
+      this.loginLoading = true;
+      this.loginError = '';
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.loginEmail, password: this.loginPassword, slug: this.slug })
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          this.loginError = data.detail || 'Login failed. Please check your credentials.';
+          return;
+        }
+        this.token = data.access_token;
+        this.currentUser = data.user;
+        localStorage.setItem('re_token', this.token);
+        this.showLogin = false;
+        this.loginPassword = '';
+        await this.fetchUsage();
+        await this.loadHistory();
+      } catch(e) {
+        this.loginError = 'Connection error. Please try again.';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+
+    logout() {
+      this.token = null;
+      this.currentUser = null;
+      localStorage.removeItem('re_token');
+      this.hasResults = false;
+      this.streamText = '';
+      this.scoreData = null;
+      this.errorMsg = '';
+      this.reports = [];
+      this.historyOpen = false;
+      this.showLogin = true;   // always show login after sign-out (tenant URL)
+    },
+
+    async fetchUsage() {
+      if (!this.token) return;
+      try {
+        const r = await fetch('/api/usage/today', { headers: { Authorization: `Bearer ${this.token}` } });
+        if (r.ok) {
+          const d = await r.json();
+          this.usageCount = d.count;
+          this.usageLimit = d.limit;
+        }
+      } catch(e) {}
+    },
+
+    async loadHistory() {
+      if (!this.token) return;
+      this.loadingHistory = true;
+      try {
+        const r = await fetch('/api/analyses', { headers: { Authorization: `Bearer ${this.token}` } });
+        if (r.ok) this.reports = await r.json();
+      } catch(e) {}
+      finally { this.loadingHistory = false; }
+    },
+
+    formatReportDate(value) {
+      if (!value) return 'Unknown date';
+      return new Date(value).toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+    },
+
+    loadReport(report) {
+      this.historyOpen = false;
+      this.address = report.address || '';
+      this.streetAddress = report.address || '';
+      this.city = ''; this.state = ''; this.zip = '';
+      this.askingPrice = report.asking_price || '';
+      this.analysisType = report.analysis_type || 'full';
+      this.streamText = report.report_text || '';
+      this.scoreData = null;
+      this.errorMsg = '';
+      this.deliveryMsg = 'Viewing a previous completed report.';
+      this.hasResults = Boolean(this.streamText);
+      this.tryParseScore(this.streamText);
+      this.$nextTick(() => this.placeInvestmentCardInReport());
+    },
+
+    getModeDesc() { const m = this.modes.find(m=>m.id===this.analysisType); return m?m.desc:''; },
+
+    getAddressPlaceholder() {
+      if (this.analysisType==='mortgage') return 'Enter price or describe scenario (e.g. $450,000 home)';
+      if (this.analysisType==='screen') return 'Describe criteria (e.g. Phoenix AZ SFR under $400k)';
+      if (this.analysisType==='market') return 'City or zip code (e.g. Austin TX or 78701)';
+      return '123 Main Street, City, State 12345';
+    },
+
+    getComposedAddress() {
+      return [this.streetAddress, [this.city, this.state, this.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ').trim();
+    },
+
+    canAnalyze() {
+      if (!this.getComposedAddress()) return false;
+      if (!this.buyerName.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(this.buyerEmail.trim())) return false;
+      if (this.analysisType==='compare'&&!this.address2.trim()) return false;
+      return true;
+    },
+
+    clearResults() {
+      this.hasResults=false; this.streamText=''; this.scoreData=null;
+      this.errorMsg=''; this.askingPrice='';
+    },
+
+    async exportPdf() {
+      this.exporting = true;
+      const source = document.getElementById('pdf-content');
+      if (!source) { this.exporting = false; return; }
+      const el = source.cloneNode(true);
+      source.removeAttribute('id');
+      el.id = 'pdf-content';
+      el.style.cssText = 'position:absolute;top:0;left:0;width:816px;margin:0;background:#fff!important;';
+      document.body.appendChild(el);
+      const addr = this.address.replace(/[^a-z0-9]/gi,'-').toLowerCase().slice(0,40);
+      const style = document.createElement('style');
+      style.id = 'pdf-light-override';
+      style.textContent = `
+        #pdf-content,#pdf-content *{transition:none!important;background:#fff!important}
+        #pdf-content{--navy:#fff;--navy-deep:#fff;--navy-mid:#fff;--navy-light:#fff;--text:#111827;--muted:#111827;--border:#e2e8f0}
+        #pdf-content .card,[class*="card"]{background:#fff!important;border-color:#e2e8f0!important}
+        #pdf-content p,#pdf-content span,#pdf-content li,#pdf-content td,#pdf-content label{color:#111827!important;opacity:1!important}
+        #pdf-content .stream-content h1,#pdf-content .stream-content h2,#pdf-content .stream-content h3{color:#111827!important;opacity:1!important}
+        #pdf-content .stream-content th{background:#fff!important;color:#111827!important;opacity:1!important}
+        #pdf-content .stream-content td{border-color:#e2e8f0!important}
+        #pdf-content .stream-content tr:nth-child(even) td{background:#fff!important}
+        #pdf-content .stream-content code{background:#fff!important;color:#111827!important}
+        #pdf-content .stream-content pre{background:#fff!important}
+        #pdf-content .stream-content blockquote{border-color:#c9982e!important;color:#111827!important}
+        #pdf-content .stream-content strong{color:#111827!important;opacity:1!important}
+        #pdf-content .disclaimer{background:#fff!important;border-color:#e2e8f0!important;color:#111827!important}
+        #pdf-content .score-ring-bg{stroke:#e2e8f0!important}
+      `;
+      document.head.appendChild(style);
+      try {
+        await html2pdf().set({
+          margin:[8,8,8,8], filename:`property-analysis-${addr}.pdf`,
+          image:{type:'jpeg',quality:0.97},
+          html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false},
+          jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
+          pagebreak:{mode:['css','legacy']}
+        }).from(el).save();
+      } finally {
+        document.getElementById('pdf-light-override')?.remove();
+        el.remove();
+        source.id = 'pdf-content';
+        this.exporting = false;
+      }
+    },
+
+    get displayText() {
+      if (!this.streamText) return '';
+      return this.streamText.replace(/```json[\s\S]*?```\s*/g,'').trim();
+    },
+
+    renderMarkdown(text) {
+      if (!text) return '';
+      try { return marked.parse(text); } catch(e) { return text; }
+    },
+
+    resetInvestmentCardPosition() {
+      const card = this.$refs.investmentCard;
+      const anchor = this.$refs.investmentCardAnchor;
+      if (card && anchor) anchor.after(card);
+    },
+
+    placeInvestmentCardInReport() {
+      const card = this.$refs.investmentCard;
+      const report = this.$root.querySelector('.stream-content');
+      if (!card || !report) return;
+      const heading = [...report.querySelectorAll('h2, h3')].find(element =>
+        element.textContent.trim().toLowerCase() === 'investment analysis'
+      );
+      if (heading) heading.after(card);
+    },
+
+    tryParseScore(text) {
+      const match = text.match(/```json\s*([\s\S]*?)```/);
+      if (!match) return;
+      try {
+        const data = JSON.parse(match[1]);
+        if (data.property_score!==undefined||data.invest_score!==undefined||data.market_score!==undefined) {
+          if (data.invest_score&&!data.property_score) {
+            data.property_score=data.invest_score;
+            data.grade=this.gradeFromScore(data.invest_score);
+            data.signal=this.signalFromScore(data.invest_score);
+          }
+          if (data.market_score&&!data.property_score) {
+            data.property_score=data.market_score;
+            data.grade=this.gradeFromScore(data.market_score);
+            data.signal=this.signalFromScore(data.market_score);
+          }
+          this.scoreData=data;
+        }
+      } catch(e) {}
+    },
+
+    gradeFromScore(s) {
+      if(s>=85)return'A+';if(s>=70)return'A';if(s>=55)return'B';if(s>=40)return'C';if(s>=25)return'D';return'F';
+    },
+    signalFromScore(s) {
+      if(s>=85)return'Strong Buy';if(s>=70)return'Buy';if(s>=55)return'Cautious Buy';
+      if(s>=40)return'Hold / Neutral';if(s>=25)return'Caution';return'Avoid';
+    },
+    scoreColor() { const s=this.scoreData?.property_score||0; return s>=70?'#22c55e':s>=40?'#c9982e':'#ef4444'; },
+    scoreRingClass() { const s=this.scoreData?.property_score||0; return s>=70?'score-green':s>=40?'score-gold':'score-red'; },
+    scoreDash() {
+      const c=2*Math.PI*50;const s=this.scoreData?.property_score||0;return`${(s/100)*c} ${c}`;
+    },
+    barColor(val) { if(!val)return'#374151';return val>=70?'#22c55e':val>=40?'#c9982e':'#ef4444'; },
+
+    getCategories() {
+      if (!this.scoreData?.scores) return [];
+      const lm={value_comps:'Value & Comps',income_potential:'Income Potential',neighborhood:'Neighborhood',
+        investment:'Investment',market:'Market Conditions',buy_hold_viability:'Buy & Hold',
+        appreciation_potential:'Appreciation',value_add_opportunity:'Value-Add',
+        risk_adjusted_return:'Risk/Return',exit_strategy_clarity:'Exit Strategy',
+        supply_demand:'Supply/Demand',price_trends:'Price Trends',economic_drivers:'Economic Drivers',
+        rental_market:'Rental Market',future_outlook:'Future Outlook'};
+      return Object.entries(this.scoreData.scores).map(([k,v])=>({
+        key:k, label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:v
+      }));
+    },
+
+    getMetrics() {
+      if (!this.scoreData?.key_metrics) return [];
+      const lm={estimated_value:'Est. Value',monthly_rent:'Monthly Rent',cap_rate:'Cap Rate',
+        monthly_cash_flow:'Cash Flow/Mo',school_avg_rating:'School Rating',walk_score:'Walk Score',
+        price_vs_comps:'vs. Comps'};
+      return Object.entries(this.scoreData.key_metrics)
+        .filter(([k,v])=>v!==null&&v!==undefined&&v!==''&&!['asking_price','suggested_offer','offer_vs_asking'].includes(k))
+        .map(([k,v])=>({label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,v)}));
+    },
+
+    formatMetricValue(key,val) {
+      if(val===null||val===undefined||val==='')return'N/A';
+      if(typeof val==='number'){
+        if(key.includes('value')||key.includes('rent')||key.includes('flow')||key.includes('price'))return'$'+val.toLocaleString();
+        if(key.includes('rate'))return typeof val==='string'?val:val+'%';
+      }
+      return String(val);
+    },
+
+    // ── Finance calculations ──────────────────────────────────────────
+    getPropertyPrice() {
+      // Priority: asking price input → Claude's asking_price → Claude's estimated_value → suggested_offer
+      const sources = [
+        this.askingPrice,
+        this.scoreData?.key_metrics?.asking_price,
+        this.scoreData?.key_metrics?.estimated_value,
+        this.scoreData?.key_metrics?.suggested_offer,
+      ];
+      for (const s of sources) {
+        if (!s || s === 'null') continue;
+        const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
+        if (n > 1000) return n;
+      }
+      return 0;
+    },
+
+    getRehabAmount() {
+      if (!this.rehabCost) return 0;
+      const n = parseFloat(String(this.rehabCost).replace(/[^0-9.]/g, ''));
+      return isNaN(n) ? 0 : n;
+    },
+
+    getPropertyTaxRate() {
+      const reportRate = this.scoreData?.key_metrics?.property_tax_rate || this.scoreData?.key_metrics?.tax_rate;
+      if (this.propertyTaxRate === 1.2 && reportRate) {
+        const text = String(reportRate);
+        const parsed = parseFloat(text.replace(/[^0-9.]/g, ''));
+        if (parsed > 0 && parsed <= 10) return (text.includes('%') ? parsed : parsed * 100) / 100;
+      }
+      const rate = parseFloat(this.propertyTaxRate);
+      return isNaN(rate) ? 0.012 : rate / 100;
+    },
+
+    getFinanceScenarios() {
+      const price = this.getPropertyPrice();
+      if (!price) return [];
+      const rate = parseFloat(this.interestRate) || 7.25;
+      const hoaMonthly = parseFloat(this.hoa) || 0;
+      const downPct = Math.min(99, Math.max(0, parseFloat(this.downPaymentPercent) || 0));
+      const taxMonthly = (price * this.getPropertyTaxRate()) / 12;
+      const insMonthly = (price * 0.005) / 12;
+      const rehab = this.getRehabAmount();
+
+      return [downPct].map(pct => {
+        const down = price * (pct / 100);
+        const loan = price - down;
+        const r = rate / 100 / 12;
+        const n = 360;
+        const pi = loan * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+        const pmi = pct < 20 ? (loan * 0.0085) / 12 : 0;
+        const piti = pi + taxMonthly + insMonthly + pmi + hoaMonthly;
+        const closingCosts = price * 0.03;
+        const cashToClose = down + closingCosts + rehab;
+        return {
+          label: pct + '%',
+          downPayment: Math.round(down),
+          loanAmount: Math.round(loan),
+          pi: Math.round(pi),
+          tax: Math.round(taxMonthly),
+          insurance: Math.round(insMonthly),
+          pmi: Math.round(pmi),
+          hoa: Math.round(hoaMonthly),
+          piti: Math.round(piti),
+          closingCosts: Math.round(closingCosts),
+          rehabCost: Math.round(rehab),
+          cashToClose: Math.round(cashToClose),
+        };
+      });
+    },
+
+    getDSCRCard() {
+      const price = this.getPropertyPrice();
+      if (!price) return null;
+      // Requires rent data from Claude's analysis
+      const rentRaw = this.rentOverride || this.scoreData?.key_metrics?.monthly_rent;
+      if (!rentRaw) return null;
+      const rent = parseFloat(String(rentRaw).replace(/[^0-9.]/g, ''));
+      if (!rent || rent < 100) return null;
+
+      const downPct  = 0.25;                                      // DSCR standard: 25% down
+      const down     = price * downPct;
+      const loan     = price * (1 - downPct);
+      const dscrRate = (parseFloat(this.interestRate) || 7.25) + 0.75; // +75bp over conventional
+      const r        = dscrRate / 100 / 12;
+      const n        = 360;
+      const pi       = loan * (r * Math.pow(1+r,n)) / (Math.pow(1+r,n) - 1);
+
+      const taxMo  = (price * this.getPropertyTaxRate()) / 12;
+      const insMo  = (price * 0.005) / 12;
+      const vacPct = 0.08;   // 8% vacancy
+      const mgmtPct = 0.10;  // 10% property management
+      const maintPct = 0.05; // 5% maintenance / CapEx reserve
+
+      const effectiveRent = rent * (1 - vacPct);
+      const opex    = rent * mgmtPct + rent * maintPct + taxMo + insMo;
+      const noi     = effectiveRent - opex;
+      const annualDebt  = pi * 12;
+      const annualNOI   = noi * 12;
+      const dscr    = annualNOI / annualDebt;
+
+      return {
+        dscrRate:       dscrRate.toFixed(2),
+        downPayment:    Math.round(down),
+        loanAmount:     Math.round(loan),
+        monthlyPI:      Math.round(pi),
+        monthlyRent:    Math.round(rent),
+        effectiveRent:  Math.round(effectiveRent),
+        monthlyNOI:     Math.round(noi),
+        annualNOI:      Math.round(annualNOI),
+        annualDebtService: Math.round(annualDebt),
+        dscr:           dscr.toFixed(2),
+        monthlyCashFlow: Math.round(noi - pi),
+        qualifies:      dscr >= 1.0,
+        comfortable:    dscr >= 1.25,
+      };
+    },
+
+    getLandContractCard() {
+      // Sale price: prefer Claude's estimated market value, fall back to asking/property price
+      const estValueRaw = this.scoreData?.key_metrics?.estimated_value;
+      let salePrice = 0;
+      if (estValueRaw && estValueRaw !== 'null') {
+        salePrice = parseFloat(String(estValueRaw).replace(/[^0-9.]/g, ''));
+      }
+      const adjustedSalePrice = parseFloat(this.landContractSalePrice) || 0;
+      if (adjustedSalePrice > 0) salePrice = adjustedSalePrice;
+      if (!salePrice || salePrice < 1000) salePrice = this.getPropertyPrice();
+      if (!salePrice) return null;
+
+      // Cost basis = what investor paid (asking price) + rehab
+      const askingNum = (() => {
+        const s = this.askingPrice;
+        if (!s) return 0;
+        const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? 0 : n;
+      })();
+      const rehab     = this.getRehabAmount();
+      const costBasis = (askingNum || salePrice) + rehab;
+
+      // Land contract terms are editable in the report.
+      const downPct = Math.min(99, Math.max(0, parseFloat(this.landContractDownPayment) || 0)) / 100;
+      const down    = salePrice * downPct;
+      const loan    = salePrice * (1 - downPct);
+      const rate    = (parseFloat(this.landContractRate) || 8.0) / 100 / 12;
+      const n       = Math.max(1, Math.round(parseFloat(this.landContractTermYears) || 30) * 12);
+      const pi      = loan * (rate * Math.pow(1+rate,n)) / (Math.pow(1+rate,n) - 1);
+
+      const taxMo = (salePrice * this.getPropertyTaxRate()) / 12;
+      const insMo = (salePrice * 0.005) / 12;
+      const totalMonthly = pi + taxMo + insMo; // full PITI from buyer
+
+      // Interest revenue: first-month interest (maximum; decreases as principal amortizes)
+      const monthlyInterestYr1 = loan * rate;
+
+      // Over 30 years: total received = pi * 360
+      // Principal recovered = loan, interest earned = (pi*360) - loan
+      const totalInterestEarned = (pi * n) - loan;
+      const equitySpread  = salePrice - costBasis;
+      const totalReturn   = salePrice + totalInterestEarned; // full principal + all interest
+      const totalProfit   = totalReturn - costBasis;
+      const annualizedReturn = costBasis > 0 ? (totalProfit / costBasis / (n / 12)) * 100 : 0;
+      const annualInterestYield = loan > 0 ? (totalInterestEarned / loan / (n / 12)) * 100 : 0;
+      const firstYearInterestYield = loan > 0 ? (monthlyInterestYr1 * 12 / loan) * 100 : 0;
+
+      return {
+        salePrice:           Math.round(salePrice),
+        downPayment:         Math.round(down),
+        loanAmount:          Math.round(loan),
+        monthlyPI:           Math.round(pi),
+        monthlyTax:          Math.round(taxMo),
+        monthlyInsurance:    Math.round(insMo),
+        totalMonthly:        Math.round(totalMonthly),
+        monthlyInterestYr1:  Math.round(monthlyInterestYr1),
+        totalInterestEarned: Math.round(totalInterestEarned),
+        costBasis:           Math.round(costBasis),
+        equitySpread:        Math.round(equitySpread),
+        totalReturn:         Math.round(totalReturn),
+        totalProfit:         Math.round(totalProfit),
+        annualizedReturn: annualizedReturn.toFixed(1),
+        annualInterestYield: annualInterestYield.toFixed(1),
+        firstYearInterestYield: firstYearInterestYield.toFixed(1),
+      };
+    },
+
+    formatCurrency(n) {
+      if (!n && n !== 0) return '—';
+      return '$' + Math.round(n).toLocaleString();
+    },
+    // ─────────────────────────────────────────────────────────────────
+
+    async analyze() {
+      if (!this.canAnalyze()||this.analyzing) return;
+      this.address = this.getComposedAddress();
+      this.resetInvestmentCardPosition();
+      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null;
+      this.statusIndex=0;
+      clearInterval(this.statusTimer);
+      this.statusTimer=setInterval(()=>{ this.statusIndex=(this.statusIndex+1)%this.analysisStatuses.length; }, 3500);
+      // Scroll to results on mobile
+      if (window.innerWidth < 640) {
+        setTimeout(()=>{ document.getElementById('pdf-content')?.scrollIntoView({behavior:'smooth',block:'start'}); }, 100);
+      }
+      const body = {
+        buyer_name:this.buyerName.trim(), buyer_email:this.buyerEmail.trim(),
+        address:this.address.trim(), analysis_type:this.analysisType,
+        address2:this.address2.trim()||null, asking_price:this.askingPrice.trim()||null,
+        rehab_cost:this.rehabCost.trim()||null,
+        price:this.price.trim()||null, beds:this.beds?parseFloat(this.beds):null,
+        baths:this.baths?parseFloat(this.baths):null, sqft:this.sqft.trim()||null,
+        year_built:this.yearBuilt?parseInt(this.yearBuilt):null,
+        property_type:this.propertyType||null, hoa:this.hoa.trim()||null,
+      };
+      try {
+        const headers = {'Content-Type':'application/json'};
+        if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+        const resp = await fetch('/analyze',{method:'POST',headers,body:JSON.stringify(body)});
+        if (!resp.ok) {
+          if (resp.status === 401) { this.logout(); throw new Error('Session expired. Please sign in again.'); }
+          if (resp.status === 429) { const d=await resp.json().catch(()=>({detail:'Daily limit reached'})); throw new Error(d.detail||'Daily analysis limit reached. Resets at midnight.'); }
+          const err=await resp.text(); throw new Error(`Server error ${resp.status}: ${err}`);
+        }
+        const reader=resp.body.getReader(); const decoder=new TextDecoder(); let buffer='';
+        while (true) {
+          const {done,value}=await reader.read(); if(done)break;
+          buffer+=decoder.decode(value,{stream:true});
+          const lines=buffer.split('\n'); buffer=lines.pop();
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data=JSON.parse(line.slice(6));
+                if(data.error)throw new Error(data.error);
+                if(data.text){
+                  this.streamText+=data.text;
+                  if(this.streamText.includes('```json')&&this.streamText.includes('```'))this.tryParseScore(this.streamText);
+                }
+                if(data.done){
+                  this.tryParseScore(this.streamText);
+                  if(data.buyer_email_sent || data.sponsor_email_sent) this.deliveryMsg='Report generated. Delivery sent to '+(data.buyer_email_sent?'the buyer':'')+(data.buyer_email_sent&&data.sponsor_email_sent?' and ':'')+(data.sponsor_email_sent?'your sponsoring partner':'')+'.';
+                  else this.deliveryMsg='Report generated. Email delivery is not configured yet; use PDF to share it with the buyer.';
+                }
+              } catch(e){ if(e.message&&!e.message.startsWith('Unexpected token'))throw e; }
+            }
+          }
+        }
+      } catch(e) {
+        this.errorMsg=e.message||'Unknown error occurred';
+        if(!this.streamText)this.hasResults=false;
+      } finally {
+        this.analyzing=false;
+        clearInterval(this.statusTimer);
+        this.statusTimer=null;
+        setTimeout(()=>this.placeInvestmentCardInReport(), 50);
+        await this.fetchUsage(); // refresh usage counter
+      }
+    }
+  };
+}
+</script>
+</body>
+</html>
