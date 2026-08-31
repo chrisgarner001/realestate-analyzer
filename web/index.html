@@ -443,6 +443,21 @@
       </div>
     </div>
 
+    <div x-show="getComparableSales().length||getRentalComparables().length" class="card rounded-xl p-4 sm:p-5 space-y-5">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div><p class="text-xs font-medium" style="color:var(--muted)">COMPARABLE REVIEW</p><p class="mt-1 text-xs" style="color:var(--muted)">Sources, recency, and selection rationale are provided for review before relying on the analysis.</p></div>
+        <div x-show="getComparableSales().length" class="text-right"><p class="text-xs" style="color:var(--muted)">Selected sale comp average</p><p class="text-lg font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSelectedSaleCompAverage())"></p></div>
+      </div>
+      <div x-show="getComparableSales().length" class="overflow-x-auto">
+        <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">SALE COMPARABLES</p>
+        <table class="w-full min-w-[680px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property</th><th class="p-2 text-left">Sale</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left">Why selected / adjustments</th></tr></thead><tbody><template x-for="(comp,index) in getComparableSales()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isSaleCompSelected(index)" @change="toggleSaleComp(index)" aria-label="Include sale comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="[comp.property_type, comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf'].filter(Boolean).join(' · ')"></span></td><td class="p-2"><span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input :value="getSaleCompValue(comp,index)" @input="setSaleCompValue(index,$event.target.value)" inputmode="numeric" class="w-28 rounded-lg pl-5 pr-2 py-1.5 text-right font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)"></span><br><span style="color:var(--muted)" x-text="comp.distance"></span></td><td class="p-2" x-text="[comp.source,comp.sale_date].filter(Boolean).join(' · ')"></td><td class="p-2" style="color:var(--muted)"><span x-text="comp.selection_rationale"></span><span x-show="comp.adjustment_notes"><br><span x-text="comp.adjustment_notes"></span></span></td></tr></template></tbody></table>
+      </div>
+      <div x-show="getRentalComparables().length" class="overflow-x-auto">
+        <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">RENTAL COMPARABLES</p>
+        <table class="w-full min-w-[620px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Property / neighborhood</th><th class="p-2 text-left">Rent</th><th class="p-2 text-left">Details</th><th class="p-2 text-left">Source / date</th></tr></thead><tbody><template x-for="(comp,index) in getRentalComparables()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="comp.neighborhood"></span></td><td class="p-2 font-semibold" x-text="formatCurrency(comp.monthly_rent)"></td><td class="p-2" style="color:var(--muted)" x-text="[comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf', comp.distance, comp.condition_features].filter(Boolean).join(' · ')"></td><td class="p-2" x-text="[comp.source,comp.listed_or_leased_date].filter(Boolean).join(' · ')"></td></tr></template></tbody></table>
+      </div>
+    </div>
+
     <!-- Score Dashboard -->
     <div x-show="scoreData!==null" class="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
 
@@ -487,15 +502,15 @@
       <!-- Key Metrics — 2 column grid on mobile -->
       <div class="card rounded-xl p-4 sm:p-5">
         <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY METRICS</p>
-        <div class="grid grid-cols-2 sm:grid-cols-1 gap-x-4 gap-y-2.5" x-show="scoreData&&scoreData.key_metrics">
+        <div class="space-y-2.5" x-show="scoreData&&scoreData.key_metrics">
           <template x-for="m in getMetrics()" :key="m.label">
-            <div class="contents">
-              <div x-show="m.key !== 'monthly_rent'" class="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+            <div>
+              <div x-show="m.key !== 'monthly_rent'" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                 <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
-                <span class="text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
+                <span class="text-sm font-semibold text-right" style="color:var(--text)" x-text="m.value"></span>
               </div>
-              <div x-show="m.key === 'monthly_rent'" class="col-span-2 flex items-center justify-between gap-2">
-                <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
+              <div x-show="m.key === 'monthly_rent'" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                <span class="min-w-0 text-xs leading-4" style="color:var(--muted)" x-text="m.label"></span>
                 <div class="flex items-center gap-1">
                   <button type="button" @click="adjustMonthlyRent(-50)" class="w-6 h-5 flex items-center justify-center rounded text-xs font-bold" style="background:var(--navy-mid);color:var(--text)" title="Decrease market monthly rent by $50" aria-label="Decrease market monthly rent">▼</button>
                   <span class="min-w-20 text-right text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
@@ -548,6 +563,19 @@
             Property tax
             <input x-model="propertyTaxRate" type="number" step="0.01" min="0" max="10" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
             <span>% / yr</span>
+          </label>
+          <label class="flex items-center gap-2" style="color:var(--muted)">
+            Tax override
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="propertyTaxMonthlyOverride" type="number" min="0" step="5" class="w-20 rounded-lg pl-5 pr-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)" placeholder="Auto"></span>
+          </label>
+          <label class="flex items-center gap-2" style="color:var(--muted)">
+            Insurance
+            <input x-model="insuranceRate" type="number" step="0.01" min="0" max="10" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <span>% / yr</span>
+          </label>
+          <label class="flex items-center gap-2" style="color:var(--muted)">
+            Monthly override
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="insuranceMonthlyOverride" type="number" min="0" step="5" class="w-20 rounded-lg pl-5 pr-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)" placeholder="Auto"></span>
           </label>
         </div>
       </div>
@@ -609,7 +637,7 @@
       </div>
 
       <p class="text-xs mt-3" style="color:var(--muted)">
-        Tax at <span x-text="propertyTaxRate+'%'"></span> annually · Insurance at 0.5% · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
+        Tax at <span x-text="propertyTaxMonthlyOverride ? formatCurrency(getMonthlyPropertyTax())+'/mo override' : propertyTaxRate+'% annually'"></span> · Insurance at <span x-text="insuranceMonthlyOverride ? formatCurrency(getMonthlyInsurance())+'/mo override' : insuranceRate+'% annually'"></span> · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
       </p>
 
       <div class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
@@ -623,6 +651,13 @@
             <p class="text-xs" style="color:var(--muted)">Adjust the average rent to recalculate the cash-flow figures below.</p>
           </div>
         </div>
+      </div>
+
+      <div x-show="getLiveRentalSummary()" class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-px overflow-hidden rounded-xl" style="background:var(--border);border:1px solid var(--border)">
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Live NOI</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getLiveRentalSummary()?.monthlyNOI)+'/mo'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Live Cash Flow</p><p class="mt-1 text-sm font-semibold" :style="getLiveRentalSummary()?.monthlyCashFlow>=0?'color:#4ade80':'color:#f87171'" x-text="formatCurrency(getLiveRentalSummary()?.monthlyCashFlow)+'/mo'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Cap Rate</p><p class="mt-1 text-sm font-semibold" x-text="getLiveRentalSummary()?.capRate+'%'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Cash on Cash</p><p class="mt-1 text-sm font-semibold" x-text="getLiveRentalSummary()?.cashOnCash+'%'"></p></div>
       </div>
 
       <!-- ── DSCR Investment Loan Card ──────────────────────────────── -->
@@ -826,6 +861,10 @@
     </div>
 
     <!-- Key Findings & Red Flags -->
+    <div x-show="hasResults&&!analyzing" class="flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-2.5" style="background:rgba(216,168,61,.12);border:1px solid rgba(216,168,61,.35)">
+      <p class="text-xs leading-relaxed" style="color:#f0c45b">The live finance and rental figures use your current assumptions. Findings, comp tables, risk matrix, and recommendation reflect the original report until refreshed.</p>
+      <button type="button" @click="analyze()" :disabled="analyzing||!canAnalyze()" class="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold" style="background:var(--gold);color:var(--navy-deep)">Refresh Analysis</button>
+    </div>
     <div x-show="scoreData&&(scoreData.red_flags?.length||scoreData.key_findings?.length)" class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
       <div x-show="scoreData&&scoreData.key_findings?.length" class="card rounded-xl p-4 sm:p-5">
         <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY FINDINGS</p>
@@ -859,6 +898,7 @@
     <div class="card rounded-xl p-4 sm:p-5">
       <div class="flex items-center gap-2 mb-3">
         <p class="text-xs font-medium" style="color:var(--muted)">DETAILED ANALYSIS</p>
+        <span x-show="hasResults&&!analyzing" class="text-xs" style="color:var(--gold-light)">Original report</span>
         <span x-show="analyzing" class="flex items-center gap-1.5 text-xs" style="color:var(--green)">
           <span class="pulse-dot w-1.5 h-1.5 rounded-full inline-block" style="background:var(--green)"></span>
           Working...
@@ -984,9 +1024,10 @@ function app() {
     errorMsg: '', streamText: '', scoreData: null,
     helpOpen: false, helpInput: '', helpLoading: false, helpMessages: [],
     helpPrompts: ['How do I run an analysis?', 'What does DSCR mean?', 'How do my tokens work?'],
-    interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2,
+    interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2, propertyTaxMonthlyOverride: '', insuranceRate: 0.5, insuranceMonthlyOverride: '',
     rentOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
     landContractRate: 8.0, landContractTermYears: 30,
+    saleCompSelections: {}, saleCompValueOverrides: {},
     statusIndex: 0, statusTimer: null,
     analysisStatuses: [
       { label:'Connecting to market data', detail:'Gathering current property and neighborhood information' },
@@ -1343,6 +1384,38 @@ function app() {
         .map(([k,v])=>({key:k, label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,k==='monthly_rent'&&this.rentOverride?this.rentOverride:v)}));
     },
 
+    getComparableSales() {
+      return Array.isArray(this.scoreData?.comparable_sales) ? this.scoreData.comparable_sales : [];
+    },
+
+    getRentalComparables() {
+      return Array.isArray(this.scoreData?.rental_comparables) ? this.scoreData.rental_comparables : [];
+    },
+
+    getSaleCompValue(comp, index) {
+      return this.saleCompValueOverrides[index] ?? comp.sale_price ?? comp.price ?? '';
+    },
+
+    isSaleCompSelected(index) {
+      return this.saleCompSelections[index] !== false;
+    },
+
+    toggleSaleComp(index) {
+      this.saleCompSelections[index] = !this.isSaleCompSelected(index);
+    },
+
+    setSaleCompValue(index, value) {
+      this.saleCompValueOverrides[index] = value;
+    },
+
+    getSelectedSaleCompAverage() {
+      const values = this.getComparableSales()
+        .filter((comp, index) => this.isSaleCompSelected(index))
+        .map((comp, index) => parseFloat(String(this.getSaleCompValue(comp, index)).replace(/[^0-9.]/g, '')))
+        .filter((value) => value > 0);
+      return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+    },
+
     adjustMonthlyRent(amount) {
       const rentRaw = this.rentOverride || this.scoreData?.key_metrics?.monthly_rent;
       const currentRent = parseFloat(String(rentRaw).replace(/[^0-9.]/g, '')) || 0;
@@ -1392,14 +1465,26 @@ function app() {
       return isNaN(rate) ? 0.012 : rate / 100;
     },
 
+    getMonthlyPropertyTax() {
+      const override = parseFloat(this.propertyTaxMonthlyOverride);
+      return !isNaN(override) && override >= 0 ? override : (this.getPropertyPrice() * this.getPropertyTaxRate()) / 12;
+    },
+
+    getMonthlyInsurance() {
+      const override = parseFloat(this.insuranceMonthlyOverride);
+      if (!isNaN(override) && override >= 0) return override;
+      const rate = parseFloat(this.insuranceRate);
+      return this.getPropertyPrice() * (isNaN(rate) ? 0.005 : rate / 100) / 12;
+    },
+
     getFinanceScenarios() {
       const price = this.getPropertyPrice();
       if (!price) return [];
       const rate = parseFloat(this.interestRate) || 7.25;
       const hoaMonthly = parseFloat(this.hoa) || 0;
       const downPct = Math.min(99, Math.max(0, parseFloat(this.downPaymentPercent) || 0));
-      const taxMonthly = (price * this.getPropertyTaxRate()) / 12;
-      const insMonthly = (price * 0.005) / 12;
+      const taxMonthly = this.getMonthlyPropertyTax();
+      const insMonthly = this.getMonthlyInsurance();
       const rehab = this.getRehabAmount();
 
       return [downPct].map(pct => {
@@ -1446,8 +1531,8 @@ function app() {
       const n        = 360;
       const pi       = loan * (r * Math.pow(1+r,n)) / (Math.pow(1+r,n) - 1);
 
-      const taxMo  = (price * this.getPropertyTaxRate()) / 12;
-      const insMo  = (price * 0.005) / 12;
+      const taxMo  = this.getMonthlyPropertyTax();
+      const insMo  = this.getMonthlyInsurance();
       const vacPct = 0.08;   // 8% vacancy
       const mgmtPct = 0.10;  // 10% property management
       const maintPct = 0.05; // 5% maintenance / CapEx reserve
@@ -1473,6 +1558,27 @@ function app() {
         monthlyCashFlow: Math.round(noi - pi),
         qualifies:      dscr >= 1.0,
         comfortable:    dscr >= 1.25,
+      };
+    },
+
+    getLiveRentalSummary() {
+      const price = this.getPropertyPrice();
+      const rentRaw = this.rentOverride || this.scoreData?.key_metrics?.monthly_rent;
+      const rent = parseFloat(String(rentRaw || '').replace(/[^0-9.]/g, ''));
+      if (!price || !rent || rent < 100) return null;
+      const scenario = this.getFinanceScenarios()[0];
+      if (!scenario) return null;
+      const vacancy = rent * 0.08;
+      const management = rent * 0.10;
+      const maintenance = rent * 0.05;
+      const monthlyNOI = rent - vacancy - management - maintenance - scenario.tax - scenario.insurance - scenario.hoa;
+      const monthlyCashFlow = monthlyNOI - scenario.pi - scenario.pmi;
+      const cashInvested = scenario.downPayment + scenario.closingCosts + scenario.rehabCost;
+      return {
+        monthlyNOI: Math.round(monthlyNOI),
+        monthlyCashFlow: Math.round(monthlyCashFlow),
+        capRate: ((monthlyNOI * 12 / price) * 100).toFixed(1),
+        cashOnCash: (cashInvested > 0 ? ((monthlyCashFlow * 12 / cashInvested) * 100) : 0).toFixed(1),
       };
     },
 
@@ -1506,8 +1612,8 @@ function app() {
       const n       = Math.max(1, Math.round(parseFloat(this.landContractTermYears) || 30) * 12);
       const pi      = loan * (rate * Math.pow(1+rate,n)) / (Math.pow(1+rate,n) - 1);
 
-      const taxMo = (salePrice * this.getPropertyTaxRate()) / 12;
-      const insMo = (salePrice * 0.005) / 12;
+      const taxMo = this.getMonthlyPropertyTax();
+      const insMo = this.getMonthlyInsurance();
       const totalMonthly = pi + taxMo + insMo; // full PITI from buyer
 
       // Interest revenue: first-month interest (maximum; decreases as principal amortizes)
@@ -1553,7 +1659,7 @@ function app() {
       if (!this.canAnalyze()||this.analyzing) return;
       this.address = this.getComposedAddress();
       this.resetInvestmentCardPosition();
-      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null;
+      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.saleCompValueOverrides={};
       this.statusIndex=0;
       clearInterval(this.statusTimer);
       this.statusTimer=setInterval(()=>{ this.statusIndex=(this.statusIndex+1)%this.analysisStatuses.length; }, 3500);

@@ -125,11 +125,18 @@ def send_invite_email(recipient: str, subject: str, html_body: str, text_body: s
 
 FULL_SYSTEM = """You are a senior real estate investment analyst with deep expertise across all US markets. When given a property address and details, you perform a comprehensive 5-dimensional analysis.
 
-IMPORTANT: Use the web_search tool to find current 2025 data before writing your analysis. Search for:
-1. Recent sold comps within 0.5 miles in the last 90 days (search Zillow/Redfin/Realtor.com)
+IMPORTANT: Use the web_search tool to find current data before writing your analysis. Search for:
+1. Recent sold comps within 0.5 miles in the last 180 days (search Zillow/Redfin/Realtor.com)
 2. Current active listings and days on market for the area
-3. Current rental rates for similar properties
+3. Current rental listings and recently leased comparables within the subject neighborhood or 1 mile for similar properties
 4. Recent market conditions and price trends for the zip code
+
+COMPARABLE DATA RULES:
+- Prefer closed sales from the last 180 days. Expand up to 365 days only when fewer than three suitable recent comps are available, and label every older comp "Older than 180 days" with the reason it was included.
+- Use like-kind properties whenever possible: same property type, similar bedrooms/bathrooms, within 20% of subject square footage, and similar condition. State any meaningful mismatch and adjustment.
+- Do not claim MLS or IDX data unless a cited source explicitly provides it. Identify the public source or state that the comp is an estimate.
+- For each sale comp, provide the selection rationale and adjustment notes. For rental comps, provide distance/neighborhood, listing or lease date/status, size, bed/bath count, condition/features, and source.
+- Explain the rental comp search geography. Do not treat an entire city as one rental market when neighborhood-level data is available.
 
 CRITICAL: Your response MUST begin with a single JSON block (```json...```) followed by detailed markdown analysis.
 
@@ -158,6 +165,12 @@ JSON schema — include ALL fields:
     "walk_score": "XX/100",
     "price_vs_comps": "X% above/below market"
   },
+    "comparable_sales": [
+        {"address":"123 Example St","sale_price":325000,"beds":3,"baths":2,"sqft":1500,"property_type":"Single Family","condition":"Updated","distance":"0.4 mi","sale_date":"2026-08-15","source":"Redfin","selection_rationale":"Same neighborhood and similar size","adjustment_notes":"None"}
+    ],
+    "rental_comparables": [
+        {"address":"123 Example St","neighborhood":"Example Neighborhood","monthly_rent":2200,"beds":3,"baths":2,"sqft":1500,"distance":"0.4 mi","listed_or_leased_date":"2026-08-15","condition_features":"Updated kitchen","source":"Zillow"}
+    ],
   "red_flags": ["flag1", "flag2"],
   "key_findings": ["finding1", "finding2", "finding3", "finding4", "finding5"],
   "recommendation": "2-3 sentence investment recommendation."
@@ -167,10 +180,10 @@ JSON schema — include ALL fields:
 After the JSON, write these sections in markdown:
 
 ## Comparable Sales Analysis
-Provide 4-6 comps in a table (Address | Sale Price | Sq Ft | $/Sq Ft | Beds/Ba | Distance | Date). Estimate fair market value. Assess over/underpriced.
+Provide 4-6 comps in a table (Address | Sale Price | Sq Ft | $/Sq Ft | Beds/Ba | Distance | Sale Date | Source | Selection / Adjustment Notes). State the search radius, date range, and confidence. Estimate fair market value and assess over/underpriced.
 
 ## Rental Income & Cash Flow
-Estimate monthly rent. Show full expense model for 3 scenarios (Conservative/Moderate/Optimistic). Calculate: Cap Rate, Cash-on-Cash, GRM, DSCR. Use 20% down, 30yr fixed ~7.0%.
+Start with a Rental Comparable table (Address / neighborhood | Rent | Beds/Ba | Sq Ft | Distance | Listed/Leased Date | Condition/Features | Source), then state the search radius, rent range, selected market rent, and confidence. Show full expense model for 3 scenarios (Conservative/Moderate/Optimistic). Calculate: Cap Rate, Cash-on-Cash, GRM, DSCR. Use 20% down, 30yr fixed ~7.0%.
 
 ## Neighborhood Quality
 Schools (elementary/middle/high ratings), safety/crime vs national avg, Walk Score, demographics (median income, population trend), top employers within 15 miles.
@@ -254,6 +267,8 @@ Start with this JSON:
 }
 ```
 
+Use closed sales within 180 days and within 0.5 miles where possible. If fewer than three suitable comps exist, expand to 365 days or 1 mile and label the limitation. For every comp, include source, sale date, distance, property type, beds/baths, square footage, selection rationale, and adjustments. Do not claim MLS/IDX data unless a source confirms it.
+
 Then provide: Comparable Sales Table | Adjustment Analysis | Fair Market Value Estimate | Market Trend Analysis | Suggested Offer Strategy.
 DISCLAIMER: Not financial advice."""
 
@@ -283,6 +298,8 @@ Start with this JSON:
   "rent_growth_yoy": "X.X%"
 }
 ```
+
+Before the analysis, include a Rental Comparable table with address/neighborhood, rent, beds/baths, square footage, distance, listed or leased date, condition/features, and source. Prefer comparables within the same neighborhood or 1 mile and from the last 90 days; explain and flag any expanded radius, older listing, or material property mismatch. Do not generalize from citywide rents when neighborhood-specific evidence is available.
 
 Then provide: Rental Market Analysis | Cash Flow Projections (3 scenarios) | Key Investment Metrics | 5-Year Rent Projection | Interest Rate Sensitivity | Assessment.
 Assume 20% down, 30yr fixed ~7.0%. Use conservative estimates.
