@@ -431,7 +431,10 @@
         </div>
         <div>
           <p class="text-xs" style="color:var(--muted)">Suggested Offer</p>
-          <p class="text-2xl font-bold" style="color:#4ade80" x-text="scoreData?.key_metrics?.suggested_offer"></p>
+          <div class="mt-1 flex items-center gap-2">
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2 text-sm" style="color:#4ade80">$</span><input x-model="suggestedOfferOverride" type="number" min="0" step="1000" class="w-32 rounded-lg pl-5 pr-2 py-1.5 text-lg font-bold" style="background:var(--navy-mid);border:1px solid rgba(74,222,128,.4);color:#4ade80"></span>
+            <span class="text-xs" style="color:var(--muted)">Editable</span>
+          </div>
         </div>
         <div x-show="scoreData?.key_metrics?.offer_vs_asking&&scoreData.key_metrics.offer_vs_asking!=='N/A'">
           <p class="text-xs" style="color:var(--muted)">vs Asking</p>
@@ -444,6 +447,25 @@
       </div>
     </div>
 
+    <div x-show="getLiveRentalSummary()" class="card rounded-xl p-4 sm:p-5">
+      <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div><p class="text-xs font-medium" style="color:var(--muted)">UPDATED UNDERWRITING</p><p class="mt-1 text-sm font-semibold" style="color:var(--text)">Current financial assumptions for this client-ready report.</p></div>
+        <p class="text-xs" style="color:var(--gold-light)">Updates automatically as assumptions change</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px overflow-hidden rounded-lg" style="background:var(--border);border:1px solid var(--border)">
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Purchase Price</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getPropertyPrice())"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Suggested Offer</p><p class="mt-1 text-sm font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSuggestedOffer())"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Rehab Budget</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getRehabAmount())"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Market Rent</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getLiveRentalSummary()?.monthlyRent)+'/mo'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Cash Flow</p><p class="mt-1 text-sm font-semibold" :style="getLiveRentalSummary()?.monthlyCashFlow>=0?'color:#4ade80':'color:#f87171'" x-text="formatCurrency(getLiveRentalSummary()?.monthlyCashFlow)+'/mo'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">DSCR</p><p class="mt-1 text-sm font-semibold" :style="getDSCRCard()?.comfortable?'color:#4ade80':getDSCRCard()?.qualifies?'color:#f0c45b':'color:#f87171'" x-text="getDSCRCard()?.dscr"></p></div>
+      </div>
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg p-3" style="background:var(--navy-mid)">
+        <div><p class="text-xs" style="color:var(--muted)">Current decision</p><p class="mt-1 text-sm font-semibold" :style="getLiveUnderwritingGuidance()?.positive?'color:#4ade80':'color:#f0c45b'" x-text="getLiveUnderwritingGuidance()?.recommendation"></p></div>
+        <p class="text-xs leading-relaxed" style="color:var(--muted)" x-text="getLiveUnderwritingGuidance()?.detail"></p>
+      </div>
+    </div>
+
     <div x-show="getComparableSales().length||getRentalComparables().length" class="card rounded-xl p-4 sm:p-5 space-y-5">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div><p class="text-xs font-medium" style="color:var(--muted)">COMPARABLE REVIEW</p><p class="mt-1 text-xs" style="color:var(--muted)">Sources, recency, and selection rationale are provided for review before relying on the analysis.</p></div>
@@ -451,7 +473,7 @@
       </div>
       <div x-show="getComparableSales().length" class="overflow-x-auto">
         <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">SALE COMPARABLES</p>
-        <table class="w-full min-w-[680px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property</th><th class="p-2 text-left">Sale</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left">Why selected / adjustments</th></tr></thead><tbody><template x-for="(comp,index) in getComparableSales()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isSaleCompSelected(index)" @change="toggleSaleComp(index)" aria-label="Include sale comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="[comp.property_type, comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf'].filter(Boolean).join(' · ')"></span></td><td class="p-2"><span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input :value="getSaleCompValue(comp,index)" @input="setSaleCompValue(index,$event.target.value)" inputmode="numeric" class="w-28 rounded-lg pl-5 pr-2 py-1.5 text-right font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)"></span><br><span style="color:var(--muted)" x-text="comp.distance"></span></td><td class="p-2" x-text="[comp.source,comp.sale_date].filter(Boolean).join(' · ')"></td><td class="p-2" style="color:var(--muted)"><span x-text="comp.selection_rationale"></span><span x-show="comp.adjustment_notes"><br><span x-text="comp.adjustment_notes"></span></span></td></tr></template></tbody></table>
+        <table class="w-full min-w-[680px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property</th><th class="p-2 text-left">Recorded sale</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left">Why selected / adjustments</th></tr></thead><tbody><template x-for="(comp,index) in getComparableSales()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isSaleCompSelected(index)" @change="toggleSaleComp(index)" aria-label="Include sale comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="[comp.property_type, comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf'].filter(Boolean).join(' · ')"></span></td><td class="p-2"><strong x-text="formatCurrency(getSaleCompValue(comp))"></strong><br><span style="color:var(--muted)" x-text="comp.distance"></span></td><td class="p-2" x-text="[comp.source,comp.sale_date].filter(Boolean).join(' · ')"></td><td class="p-2" style="color:var(--muted)"><span x-text="comp.selection_rationale"></span><span x-show="comp.adjustment_notes"><br><span x-text="comp.adjustment_notes"></span></span></td></tr></template></tbody></table>
       </div>
       <div x-show="getRentalComparables().length" class="overflow-x-auto">
         <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">RENTAL COMPARABLES</p>
@@ -749,7 +771,21 @@
         <label class="flex items-center gap-2">Rehab cost adjustment
           <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="rehabCost" type="number" min="0" step="500" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)"></span>
         </label>
+        <label class="flex items-center gap-2">Estimated ARV
+          <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="arvOverride" type="number" min="0" step="1000" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)"></span>
+        </label>
         <span>Updates cost basis and cash needed.</span>
+      </div>
+
+      <div x-show="getLiveFlipScenario()" class="mb-4 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
+        <div class="px-3 py-2 flex flex-wrap items-center justify-between gap-2" style="background:var(--navy-mid)"><p class="text-xs font-semibold" style="color:var(--gold-light)">LIVE FIX &amp; FLIP SNAPSHOT</p><p class="text-xs" style="color:var(--muted)">Uses current offer, ARV, and rehab inputs</p></div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-px" style="background:var(--border)">
+          <div class="p-3" style="background:var(--navy)"><p class="text-xs" style="color:var(--muted)">All-in Before Sale</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getLiveFlipScenario()?.allInBeforeSale)"></p></div>
+          <div class="p-3" style="background:var(--navy)"><p class="text-xs" style="color:var(--muted)">Selling Costs</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getLiveFlipScenario()?.sellingCosts)"></p></div>
+          <div class="p-3" style="background:var(--navy)"><p class="text-xs" style="color:var(--muted)">Projected Profit</p><p class="mt-1 text-sm font-semibold" :style="getLiveFlipScenario()?.netProfit>=0?'color:#4ade80':'color:#f87171'" x-text="formatCurrency(getLiveFlipScenario()?.netProfit)"></p></div>
+          <div class="p-3" style="background:var(--navy)"><p class="text-xs" style="color:var(--muted)">ROI Before Holding</p><p class="mt-1 text-sm font-semibold" :style="getLiveFlipScenario()?.netProfit>=0?'color:#4ade80':'color:#f87171'" x-text="getLiveFlipScenario()?.roi+'%'"></p></div>
+        </div>
+        <p class="px-3 py-2 text-xs" style="background:var(--navy-mid);color:var(--muted)">Includes 3% acquisition and 8% selling costs. Add financing, utilities, and holding costs before committing.</p>
       </div>
 
       <div class="mb-4 rounded-xl p-3" style="border:1px solid var(--border);background:var(--navy-mid)">
@@ -1048,9 +1084,9 @@ function app() {
     helpOpen: false, helpInput: '', helpLoading: false, helpMessages: [],
     helpPrompts: ['How do I run an analysis?', 'What does DSCR mean?', 'How do my tokens work?'],
     interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2, propertyTaxMonthlyOverride: '', insuranceRate: 0.5, insuranceMonthlyOverride: '',
-    rentOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
+    rentOverride: '', suggestedOfferOverride: '', arvOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
     landContractRate: 8.0, landContractTermYears: 30,
-    saleCompSelections: {}, saleCompValueOverrides: {},
+    saleCompSelections: {},
     statusIndex: 0, statusTimer: null,
     analysisStatuses: [
       { label:'Connecting to market data', detail:'Gathering current property and neighborhood information' },
@@ -1255,11 +1291,6 @@ function app() {
       this.exporting = true;
       const source = document.getElementById('pdf-content');
       if (!source) { this.exporting = false; return; }
-      const el = source.cloneNode(true);
-      source.removeAttribute('id');
-      el.id = 'pdf-content';
-      el.style.cssText = 'position:absolute;top:0;left:0;width:816px;margin:0;background:#fff!important;';
-      document.body.appendChild(el);
       const addr = this.address.replace(/[^a-z0-9]/gi,'-').toLowerCase().slice(0,40);
       const style = document.createElement('style');
       style.id = 'pdf-light-override';
@@ -1287,11 +1318,9 @@ function app() {
           html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false},
           jsPDF:{unit:'mm',format:'letter',orientation:'portrait'},
           pagebreak:{mode:['css','legacy']}
-        }).from(el).save();
+        }).from(source).save();
       } finally {
         document.getElementById('pdf-light-override')?.remove();
-        el.remove();
-        source.id = 'pdf-content';
         this.exporting = false;
       }
     },
@@ -1367,6 +1396,8 @@ function app() {
           }
           this.scoreData=data;
           if (!this.rentOverride) this.rentOverride = this.getModerateMonthlyRent();
+          if (!this.suggestedOfferOverride) this.suggestedOfferOverride = this.getReportSuggestedOffer();
+          if (!this.arvOverride) this.arvOverride = this.getEstimatedARV();
         }
       } catch(e) {}
     },
@@ -1405,11 +1436,52 @@ function app() {
         price_vs_comps:'vs. Comps'};
       return Object.entries(this.scoreData.key_metrics)
         .filter(([k,v])=>v!==null&&v!==undefined&&v!==''&&!['asking_price','suggested_offer','offer_vs_asking'].includes(k))
-        .map(([k,v])=>({key:k, label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,k==='monthly_rent'&&this.rentOverride?this.rentOverride:v)}));
+        .map(([k,v])=>({key:k, label:k==='monthly_cash_flow'?'Cash Flow':lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,k==='monthly_rent'&&this.rentOverride?this.rentOverride:v)}));
     },
 
     getComparableSales() {
       return Array.isArray(this.scoreData?.comparable_sales) ? this.scoreData.comparable_sales : [];
+    },
+
+    getReportSuggestedOffer() {
+      const value = this.scoreData?.key_metrics?.suggested_offer || '';
+      return parseFloat(String(value).replace(/[^0-9.]/g, '')) || '';
+    },
+
+    getSuggestedOffer() {
+      return parseFloat(this.suggestedOfferOverride) || this.getReportSuggestedOffer() || 0;
+    },
+
+    getEstimatedARV() {
+      const value = this.scoreData?.key_metrics?.estimated_value || this.getPropertyPrice();
+      return parseFloat(String(value).replace(/[^0-9.]/g, '')) || 0;
+    },
+
+    getLiveFlipScenario() {
+      const purchase = this.getSuggestedOffer() || this.getPropertyPrice();
+      const arv = parseFloat(this.arvOverride) || this.getEstimatedARV();
+      if (!purchase || !arv) return null;
+      const rehab = this.getRehabAmount();
+      const acquisitionCosts = purchase * 0.03;
+      const sellingCosts = arv * 0.08;
+      const allInBeforeSale = purchase + rehab + acquisitionCosts;
+      const netProfit = arv - allInBeforeSale - sellingCosts;
+      return { allInBeforeSale: Math.round(allInBeforeSale), sellingCosts: Math.round(sellingCosts), netProfit: Math.round(netProfit), roi: ((netProfit / allInBeforeSale) * 100).toFixed(1) };
+    },
+
+    getLiveUnderwritingGuidance() {
+      const rental = this.getLiveRentalSummary();
+      const dscr = this.getDSCRCard();
+      const flip = this.getLiveFlipScenario();
+      if (!rental || !dscr) return null;
+      const risks = [];
+      if (rental.monthlyCashFlow < 0) risks.push('monthly cash flow is negative');
+      if (Number(dscr.dscr) < 1) risks.push('DSCR is below 1.00');
+      else if (Number(dscr.dscr) < 1.25) risks.push('DSCR is below the typical 1.25 lending threshold');
+      if (flip && flip.netProfit < 25000) risks.push('flip profit is below a $25,000 target before holding costs');
+      return risks.length
+        ? { positive:false, recommendation:'Review Before Proceeding', detail:`Current assumptions show ${risks.join('; ')}.` }
+        : { positive:true, recommendation:'Current Assumptions Support Proceeding', detail:'Cash flow and DSCR meet the live underwriting thresholds. Confirm inspections, financing terms, and final contractor bids before committing.' };
     },
 
     getModerateMonthlyRent() {
@@ -1427,8 +1499,8 @@ function app() {
       return Array.isArray(this.scoreData?.rental_comparables) ? this.scoreData.rental_comparables : [];
     },
 
-    getSaleCompValue(comp, index) {
-      return this.saleCompValueOverrides[index] ?? comp.sale_price ?? comp.price ?? '';
+    getSaleCompValue(comp) {
+      return comp.sale_price ?? comp.price ?? '';
     },
 
     isSaleCompSelected(index) {
@@ -1439,14 +1511,10 @@ function app() {
       this.saleCompSelections[index] = !this.isSaleCompSelected(index);
     },
 
-    setSaleCompValue(index, value) {
-      this.saleCompValueOverrides[index] = value;
-    },
-
     getSelectedSaleCompAverage() {
       const values = this.getComparableSales()
         .filter((comp, index) => this.isSaleCompSelected(index))
-        .map((comp, index) => parseFloat(String(this.getSaleCompValue(comp, index)).replace(/[^0-9.]/g, '')))
+        .map((comp) => parseFloat(String(this.getSaleCompValue(comp)).replace(/[^0-9.]/g, '')))
         .filter((value) => value > 0);
       return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
     },
@@ -1610,6 +1678,7 @@ function app() {
       const monthlyCashFlow = monthlyNOI - scenario.pi - scenario.pmi;
       const cashInvested = scenario.downPayment + scenario.closingCosts + scenario.rehabCost;
       return {
+        monthlyRent: Math.round(rent),
         monthlyNOI: Math.round(monthlyNOI),
         monthlyCashFlow: Math.round(monthlyCashFlow),
         capRate: ((monthlyNOI * 12 / price) * 100).toFixed(1),
@@ -1694,7 +1763,7 @@ function app() {
       if (!this.canAnalyze()||this.analyzing) return;
       this.address = this.getComposedAddress();
       this.resetInvestmentCardPosition();
-      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.saleCompValueOverrides={};
+      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.rentOverride=''; this.suggestedOfferOverride=''; this.arvOverride='';
       this.statusIndex=0;
       clearInterval(this.statusTimer);
       this.statusTimer=setInterval(()=>{ this.statusIndex=(this.statusIndex+1)%this.analysisStatuses.length; }, 3500);
