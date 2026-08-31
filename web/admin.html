@@ -923,10 +923,11 @@ function admin() {
       if (!this.invitePreviewHtml) this.generateInvitePreview();
       try {
         const plainText = this.inviteText.replace(/^Subject:.*\n\n/, '');
+        const inviteBody = new DOMParser().parseFromString(this.invitePreviewHtml, 'text/html').body.innerHTML;
         if (navigator.clipboard.write && window.ClipboardItem) {
           await navigator.clipboard.write([
             new ClipboardItem({
-              'text/html': new Blob([this.invitePreviewHtml], { type: 'text/html' }),
+              'text/html': new Blob([inviteBody], { type: 'text/html' }),
               'text/plain': new Blob([plainText], { type: 'text/plain' }),
             }),
           ]);
