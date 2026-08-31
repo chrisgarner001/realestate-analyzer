@@ -397,6 +397,7 @@
 
   <!-- Results -->
   <div x-show="hasResults||analyzing" id="pdf-content" class="space-y-3 sm:space-y-4 fade-in">
+    <div x-show="!analyzing" class="space-y-3 sm:space-y-4">
 
     <!-- Partner-branded report header included in PDF exports -->
     <div class="rounded-xl p-5 sm:p-7 text-center" style="background:#f8fafc;border:1px solid #e2e8f0">
@@ -894,6 +895,8 @@
       </div>
     </div>
 
+    </div>
+
     <!-- Analysis status and completed report -->
     <div class="card rounded-xl p-4 sm:p-5">
       <div class="flex items-center gap-2 mb-3">
@@ -921,7 +924,7 @@
     </div>
 
     <!-- Disclaimer -->
-    <div class="disclaimer px-4 py-3 rounded-lg" style="background:var(--navy)">
+    <div x-show="!analyzing" class="disclaimer px-4 py-3 rounded-lg" style="background:var(--navy)">
       <p>DISCLAIMER: For educational and research purposes only. Not financial or investment advice. All estimates are AI-generated approximations. Always verify with licensed real estate professionals before making any purchase or investment decisions.</p>
     </div>
   </div>
