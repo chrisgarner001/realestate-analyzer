@@ -866,8 +866,7 @@
 
     <!-- Key Findings & Red Flags -->
     <div x-show="hasResults&&!analyzing" class="flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-2.5" style="background:rgba(216,168,61,.12);border:1px solid rgba(216,168,61,.35)">
-      <p class="text-xs leading-relaxed" style="color:#f0c45b">The live finance and rental figures use your current assumptions. Findings, comp tables, risk matrix, and recommendation reflect the original report until refreshed.</p>
-      <button type="button" @click="analyze()" :disabled="analyzing||!canAnalyze()" class="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold" style="background:var(--gold);color:var(--navy-deep)">Refresh Analysis</button>
+      <p class="text-xs leading-relaxed" style="color:#f0c45b">Finance and rental calculations update automatically as you change assumptions. Findings, comp tables, risk matrix, and recommendation remain from the original report.</p>
     </div>
     <div x-show="scoreData&&(scoreData.red_flags?.length||scoreData.key_findings?.length)" class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
       <div x-show="scoreData&&scoreData.key_findings?.length" class="card rounded-xl p-4 sm:p-5">
