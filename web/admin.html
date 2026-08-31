@@ -202,6 +202,10 @@
             <p class="text-xs" style="color:var(--muted)">Create a branded onboarding email for a new agent.</p>
           </div>
           <div class="flex items-center gap-2">
+            <button @click="generateInvitePreview()" class="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5" style="background:var(--brand);color:#fff">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Generate Invite
+            </button>
             <button @click="createInviteUser()" :disabled="savingUser || !inviteForm.agent_email || !inviteForm.temp_password" class="text-xs px-3 py-1.5 rounded-lg font-semibold" style="background:var(--green);color:#fff" x-text="savingUser?'Creating...':'Create User'"></button>
             <button @click="copyInviteBody()" class="text-xs px-3 py-1.5 rounded-lg" style="background:rgba(59,130,246,.12);color:#93c5fd">Copy Email Body</button>
             <button @click="clearInvite()" class="text-xs px-3 py-1.5 rounded-lg" style="background:var(--navy-mid);color:var(--muted)">Clear</button>
