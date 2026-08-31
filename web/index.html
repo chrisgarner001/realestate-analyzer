@@ -925,6 +925,24 @@
       <div x-show="!analyzing&&displayText.length>0" class="stream-content text-sm leading-relaxed" x-html="renderMarkdown(displayText)"></div>
     </div>
 
+    <section x-show="hasResults&&!analyzing" class="card rounded-xl p-4 sm:p-5">
+      <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div>
+          <p class="text-xs font-medium" style="color:var(--muted)">NEXT STEPS</p>
+          <p class="mt-1 text-sm font-semibold" style="color:var(--text)">Build the right team before you move forward.</p>
+        </div>
+        <p class="text-xs" style="color:var(--muted)" x-text="tenant&&tenant.company_name?'Coordinate referrals through '+tenant.company_name:'Coordinate these services with your real estate team.'"></p>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-lg" style="background:var(--border);border:1px solid var(--border)">
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Home Inspection</p><p class="mt-1 text-xs" style="color:var(--muted)">Confirm condition, safety, and repair priorities.</p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Appraisal</p><p class="mt-1 text-xs" style="color:var(--muted)">Validate value before financing or final pricing.</p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Rehab Contractor</p><p class="mt-1 text-xs" style="color:var(--muted)">Obtain a detailed scope, bids, and timeline.</p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Mortgage Broker</p><p class="mt-1 text-xs" style="color:var(--muted)">Confirm financing options and underwriting terms.</p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Title Company</p><p class="mt-1 text-xs" style="color:var(--muted)">Review title, closing requirements, and escrow.</p></div>
+        <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Real Estate Attorney</p><p class="mt-1 text-xs" style="color:var(--muted)">Review contracts, entity structure, and risk.</p></div>
+      </div>
+    </section>
+
     <!-- Disclaimer -->
     <div x-show="!analyzing" class="disclaimer px-4 py-3 rounded-lg" style="background:var(--navy)">
       <p>DISCLAIMER: For educational and research purposes only. Not financial or investment advice. All estimates are AI-generated approximations. Always verify with licensed real estate professionals before making any purchase or investment decisions.</p>
