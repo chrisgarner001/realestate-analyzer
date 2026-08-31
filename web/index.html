@@ -43,6 +43,10 @@
   .stream-content th { background: var(--navy-mid); color: var(--gold-light); padding: 0.45rem 0.6rem; text-align: left; border: 1px solid var(--border); }
   .stream-content td { padding: 0.4rem 0.6rem; border: 1px solid var(--border); color: #cbd5e1; }
   .stream-content tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  .risk-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 3.75rem; padding: 0.15rem 0.45rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; line-height: 1.25; }
+  .risk-badge-high { background: rgba(239,68,68,.18); color: #fca5a5; }
+  .risk-badge-medium { background: rgba(216,168,61,.18); color: #f0c45b; }
+  .risk-badge-low { background: rgba(45,155,88,.18); color: #86efac; }
   .stream-content code { background: var(--navy-mid); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em; color: #93c5fd; }
   .stream-content pre { background: var(--navy-mid); padding: 0.75rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
   .stream-content pre code { background: none; padding: 0; color: #93c5fd; }
@@ -485,9 +489,19 @@
         <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY METRICS</p>
         <div class="grid grid-cols-2 sm:grid-cols-1 gap-x-4 gap-y-2.5" x-show="scoreData&&scoreData.key_metrics">
           <template x-for="m in getMetrics()" :key="m.label">
-            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center">
-              <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
-              <span class="text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
+            <div class="contents">
+              <div x-show="m.key !== 'monthly_rent'" class="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+                <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
+                <span class="text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
+              </div>
+              <div x-show="m.key === 'monthly_rent'" class="col-span-2 flex items-center justify-between gap-2">
+                <span class="text-xs" style="color:var(--muted)" x-text="m.label"></span>
+                <div class="flex items-center gap-1">
+                  <button type="button" @click="adjustMonthlyRent(-50)" class="w-6 h-5 flex items-center justify-center rounded text-xs font-bold" style="background:var(--navy-mid);color:var(--text)" title="Decrease market monthly rent by $50" aria-label="Decrease market monthly rent">▼</button>
+                  <span class="min-w-20 text-right text-sm sm:text-xs font-semibold" style="color:var(--text)" x-text="m.value"></span>
+                  <button type="button" @click="adjustMonthlyRent(50)" class="w-6 h-5 flex items-center justify-center rounded text-xs font-bold" style="background:var(--navy-mid);color:var(--text)" title="Increase market monthly rent by $50" aria-label="Increase market monthly rent">▲</button>
+                </div>
+              </div>
             </div>
           </template>
         </div>
@@ -1225,7 +1239,35 @@ function app() {
 
     renderMarkdown(text) {
       if (!text) return '';
-      try { return marked.parse(text); } catch(e) { return text; }
+      try {
+        const html = marked.parse(text);
+        const report = new DOMParser().parseFromString(html, 'text/html');
+        const heading = [...report.querySelectorAll('h1, h2, h3')]
+          .find((element) => element.textContent.trim().toLowerCase() === 'risk matrix');
+        if (!heading) return html;
+
+        let sibling = heading.nextElementSibling;
+        let table = null;
+        while (sibling && !table) {
+          table = sibling.tagName === 'TABLE' ? sibling : sibling.querySelector('table');
+          sibling = sibling.nextElementSibling;
+        }
+        if (!table) return html;
+
+        const riskColumns = [...table.querySelectorAll('th')]
+          .map((header, index) => ({ index, name: header.textContent.trim().toLowerCase() }))
+          .filter(({ name }) => ['severity', 'likelihood', 'impact'].includes(name));
+        table.querySelectorAll('tbody tr').forEach((row) => {
+          const cells = row.querySelectorAll('td');
+          riskColumns.forEach(({ index }) => {
+            const cell = cells[index];
+            const level = cell?.textContent.trim().toLowerCase();
+            const badgeClass = level?.includes('high') ? 'high' : level?.includes('medium') || level?.includes('moderate') ? 'medium' : level?.includes('low') ? 'low' : '';
+            if (cell && badgeClass) cell.innerHTML = `<span class="risk-badge risk-badge-${badgeClass}">${cell.innerHTML}</span>`;
+          });
+        });
+        return report.body.innerHTML;
+      } catch(e) { return text; }
     },
 
     resetInvestmentCardPosition() {
@@ -1293,12 +1335,18 @@ function app() {
 
     getMetrics() {
       if (!this.scoreData?.key_metrics) return [];
-      const lm={estimated_value:'Est. Value',monthly_rent:'Monthly Rent',cap_rate:'Cap Rate',
+      const lm={estimated_value:'Est. Value',monthly_rent:'Market Monthly Rent',cap_rate:'Cap Rate',
         monthly_cash_flow:'Cash Flow/Mo',school_avg_rating:'School Rating',walk_score:'Walk Score',
         price_vs_comps:'vs. Comps'};
       return Object.entries(this.scoreData.key_metrics)
         .filter(([k,v])=>v!==null&&v!==undefined&&v!==''&&!['asking_price','suggested_offer','offer_vs_asking'].includes(k))
-        .map(([k,v])=>({label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,v)}));
+        .map(([k,v])=>({key:k, label:lm[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value:this.formatMetricValue(k,k==='monthly_rent'&&this.rentOverride?this.rentOverride:v)}));
+    },
+
+    adjustMonthlyRent(amount) {
+      const rentRaw = this.rentOverride || this.scoreData?.key_metrics?.monthly_rent;
+      const currentRent = parseFloat(String(rentRaw).replace(/[^0-9.]/g, '')) || 0;
+      this.rentOverride = Math.max(0, currentRent + amount);
     },
 
     formatMetricValue(key,val) {
