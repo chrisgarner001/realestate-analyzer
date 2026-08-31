@@ -8,6 +8,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --navy: #223149; --navy-deep: #142235; --navy-mid: #2d405b;
@@ -216,6 +217,11 @@
       </svg>
       <span class="hidden sm:inline" x-text="exporting?'Exporting...':'PDF'"></span>
       <span class="sm:hidden">PDF</span>
+    </button>
+    <button x-show="hasResults && !analyzing" @click="exportExcel()" :disabled="exportingExcel"
+      class="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1" style="background:var(--green);color:#fff">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4m4 4v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3"/></svg>
+      <span x-text="exportingExcel?'Exporting...':'Excel'"></span>
     </button>
     <button x-show="hasResults" @click="clearResults()"
       class="text-xs px-3 py-1.5 rounded-lg" style="background:var(--navy-mid);color:var(--muted)">Clear</button>
@@ -1079,7 +1085,7 @@ function app() {
     address:'', streetAddress:'', city:'', state:'', zip:'', address2:'', analysisType:'full', askingPrice:'', rehabCost:'',
     price:'', beds:'', baths:'', sqft:'', yearBuilt:'', propertyType:'', hoa:'',
     showAdvanced: false,
-    analyzing: false, exporting: false, hasResults: false,
+    analyzing: false, exporting: false, exportingExcel: false, hasResults: false,
     errorMsg: '', streamText: '', scoreData: null,
     helpOpen: false, helpInput: '', helpLoading: false, helpMessages: [],
     helpPrompts: ['How do I run an analysis?', 'What does DSCR mean?', 'How do my tokens work?'],
@@ -1322,6 +1328,93 @@ function app() {
       } finally {
         document.getElementById('pdf-light-override')?.remove();
         this.exporting = false;
+      }
+    },
+
+    exportExcel() {
+      if (this.exportingExcel || typeof XLSX === 'undefined') return;
+      this.exportingExcel = true;
+      try {
+        const finance = this.getFinanceScenarios()[0] || {};
+        const rental = this.getLiveRentalSummary() || {};
+        const dscr = this.getDSCRCard() || {};
+        const flip = this.getLiveFlipScenario() || {};
+        const now = new Date().toISOString();
+        const workbook = XLSX.utils.book_new();
+        const appendSheet = (name, rows) => {
+          const sheet = XLSX.utils.json_to_sheet(rows);
+          sheet['!cols'] = Object.keys(rows[0] || {}).map((key) => ({ wch: Math.min(Math.max(key.length + 2, 16), 34) }));
+          XLSX.utils.book_append_sheet(workbook, sheet, name);
+        };
+
+        appendSheet('Portfolio Summary', [{
+          report_generated_at: now,
+          property_address: this.address,
+          analysis_type: this.analysisType,
+          property_score: this.scoreData?.property_score ?? '',
+          signal: this.scoreData?.signal ?? '',
+          purchase_price: this.getPropertyPrice(),
+          suggested_offer: this.getSuggestedOffer(),
+          estimated_arv: parseFloat(this.arvOverride) || this.getEstimatedARV(),
+          rehab_budget: this.getRehabAmount(),
+          market_monthly_rent: rental.monthlyRent ?? '',
+          monthly_noi: rental.monthlyNOI ?? '',
+          monthly_cash_flow: rental.monthlyCashFlow ?? '',
+          cap_rate_pct: rental.capRate ?? '',
+          cash_on_cash_pct: rental.cashOnCash ?? '',
+          dscr: dscr.dscr ?? '',
+          monthly_piti: finance.piti ?? '',
+          down_payment_pct: this.downPaymentPercent,
+          interest_rate_pct: this.interestRate,
+          property_tax_monthly: finance.tax ?? '',
+          insurance_monthly: finance.insurance ?? '',
+          hoa_monthly: finance.hoa ?? '',
+          flip_net_profit_before_holding: flip.netProfit ?? '',
+          flip_roi_before_holding_pct: flip.roi ?? '',
+          current_decision: this.getLiveUnderwritingGuidance()?.recommendation ?? '',
+        }]);
+        appendSheet('Assumptions', [
+          { category: 'Acquisition', input: 'Purchase price', value: this.getPropertyPrice(), unit: 'USD' },
+          { category: 'Acquisition', input: 'Suggested offer', value: this.getSuggestedOffer(), unit: 'USD' },
+          { category: 'Acquisition', input: 'Estimated ARV', value: parseFloat(this.arvOverride) || this.getEstimatedARV(), unit: 'USD' },
+          { category: 'Acquisition', input: 'Rehab budget', value: this.getRehabAmount(), unit: 'USD' },
+          { category: 'Financing', input: 'Down payment', value: this.downPaymentPercent, unit: '%' },
+          { category: 'Financing', input: 'Interest rate', value: this.interestRate, unit: '%' },
+          { category: 'Expenses', input: 'Property tax', value: finance.tax ?? '', unit: 'USD/month' },
+          { category: 'Expenses', input: 'Insurance', value: finance.insurance ?? '', unit: 'USD/month' },
+          { category: 'Expenses', input: 'HOA', value: finance.hoa ?? '', unit: 'USD/month' },
+          { category: 'Income', input: 'Market monthly rent', value: rental.monthlyRent ?? '', unit: 'USD/month' },
+        ]);
+        appendSheet('Financing', [{
+          down_payment: finance.downPayment ?? '', loan_amount: finance.loanAmount ?? '',
+          monthly_principal_interest: finance.pi ?? '', monthly_property_tax: finance.tax ?? '',
+          monthly_insurance: finance.insurance ?? '', monthly_pmi: finance.pmi ?? '',
+          monthly_hoa: finance.hoa ?? '', monthly_piti: finance.piti ?? '',
+          closing_costs: finance.closingCosts ?? '', total_cash_needed: finance.cashToClose ?? '',
+        }]);
+        appendSheet('Rental Underwriting', [{
+          market_monthly_rent: rental.monthlyRent ?? '', monthly_noi: rental.monthlyNOI ?? '',
+          monthly_cash_flow: rental.monthlyCashFlow ?? '', cap_rate_pct: rental.capRate ?? '',
+          cash_on_cash_pct: rental.cashOnCash ?? '', dscr: dscr.dscr ?? '',
+          dscr_monthly_debt_service: dscr.monthlyPI ?? '', dscr_annual_noi: dscr.annualNOI ?? '',
+        }]);
+        appendSheet('Fix and Flip', [{
+          purchase_price: this.getSuggestedOffer() || this.getPropertyPrice(), estimated_arv: parseFloat(this.arvOverride) || this.getEstimatedARV(),
+          rehab_budget: this.getRehabAmount(), all_in_before_sale: flip.allInBeforeSale ?? '',
+          selling_costs: flip.sellingCosts ?? '', net_profit_before_holding: flip.netProfit ?? '',
+          roi_before_holding_pct: flip.roi ?? '',
+        }]);
+        if (this.getComparableSales().length) appendSheet('Sale Comparables', this.getComparableSales().map((comp, index) => ({
+          included: this.isSaleCompSelected(index) ? 'Yes' : 'No', address: comp.address ?? '', sale_price: this.getSaleCompValue(comp),
+          property_type: comp.property_type ?? '', beds: comp.beds ?? '', baths: comp.baths ?? '', sqft: comp.sqft ?? '',
+          distance: comp.distance ?? '', sale_date: comp.sale_date ?? '', source: comp.source ?? '',
+          selection_rationale: comp.selection_rationale ?? '', adjustment_notes: comp.adjustment_notes ?? '',
+        })));
+        if (this.getRentalComparables().length) appendSheet('Rental Comparables', this.getRentalComparables());
+        const address = (this.address || 'property-analysis').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40);
+        XLSX.writeFile(workbook, `property-underwriting-${address}.xlsx`);
+      } finally {
+        this.exportingExcel = false;
       }
     },
 
