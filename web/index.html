@@ -88,10 +88,10 @@
   <div class="w-full max-w-sm">
     <!-- Logo / Brand -->
     <div class="text-center mb-6">
-      <div x-show="tenant&&tenant.logo_url" class="mb-3 flex justify-center">
+      <div x-show="tenant&&tenant.logo_url" x-cloak class="mb-3 flex justify-center">
         <img :src="tenant&&tenant.logo_url" alt="logo" class="h-14 object-contain rounded-lg">
       </div>
-      <div x-show="!tenant||!tenant.logo_url" class="mb-3 flex justify-center">
+      <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="mb-3 flex justify-center">
         <div class="w-14 h-14 rounded-2xl flex items-center justify-center brand-accent">
           <svg class="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
@@ -151,10 +151,10 @@
 <!-- Header -->
 <header class="card border-b border-gray-700/50 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-50">
   <div class="flex items-center gap-2.5">
-    <div x-show="tenant&&tenant.logo_url" class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--navy-mid)">
+    <div x-show="tenant&&tenant.logo_url" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--navy-mid)">
       <img :src="tenant&&tenant.logo_url" alt="Company logo" class="w-full h-full object-contain">
     </div>
-    <div x-show="!tenant||!tenant.logo_url" class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--green)">
+    <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--green)">
       <svg class="w-4 h-4 sm:w-5 sm:h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
       </svg>
@@ -969,7 +969,7 @@ function app() {
 
   return {
     // ── Auth state ──────────────────────────────────────────────────
-    token: null, currentUser: null, tenant: null,
+    token: null, currentUser: null, tenant: null, brandingLoading: !!_slug,
     slug: _slug,
     showLogin: !!_slug,   // login shown immediately on tenant URLs — no blank flash
     loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
@@ -1028,7 +1028,7 @@ function app() {
               document.title = this.tenant.company_name + ' — Property Analyzer';
             }
           }
-        } catch(e) {}
+        } catch(e) {} finally { this.brandingLoading = false; }
       }
 
       // Auto-login if a valid JWT is saved
