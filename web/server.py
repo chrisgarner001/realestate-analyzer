@@ -895,40 +895,62 @@ async def admin_list_users(current_user: User = Depends(auth.require_admin), db:
 
 @app.post("/api/admin/users")
 async def admin_create_user(req: CreateUserRequest, current_user: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
-    if db.query(User).filter_by(email=req.email).first():
+    email = req.email.strip().lower()
+    existing_user = db.query(User).filter_by(email=email).first()
+    if existing_user and (existing_user.tenant_id != current_user.tenant_id or existing_user.is_active):
         raise HTTPException(400, "Email already in use")
-    user = User(
-        tenant_id=current_user.tenant_id,
-        email=req.email,
-        password_hash=auth.hash_password(req.password),
-        full_name=req.full_name,
-        role=req.role if req.role in ("realtor", "admin") else "realtor",
-        is_active=True,
-    )
-    db.add(user); db.commit(); db.refresh(user)
+    if existing_user:
+        user = existing_user
+        user.password_hash = auth.hash_password(req.password)
+        user.full_name = req.full_name
+        user.role = req.role if req.role in ("realtor", "admin") else "realtor"
+        user.is_active = True
+    else:
+        user = User(
+            tenant_id=current_user.tenant_id,
+            email=email,
+            password_hash=auth.hash_password(req.password),
+            full_name=req.full_name,
+            role=req.role if req.role in ("realtor", "admin") else "realtor",
+            is_active=True,
+        )
+        db.add(user)
+    db.commit(); db.refresh(user)
     return {"id": user.id, "email": user.email, "full_name": user.full_name,
             "role": user.role, "token_balance": user.token_balance or 0}
 
 @app.post("/api/admin/invite")
 async def admin_send_invite(req: SendInviteRequest, current_user: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
     email = req.email.strip().lower()
-    if db.query(User).filter_by(email=email).first():
+    existing_user = db.query(User).filter_by(email=email).first()
+    if existing_user and (existing_user.tenant_id != current_user.tenant_id or existing_user.is_active):
         raise HTTPException(400, "Email already in use")
-    user = User(
-        tenant_id=current_user.tenant_id,
-        email=email,
-        password_hash=auth.hash_password(req.password),
-        full_name=req.full_name,
-        role="realtor",
-        is_active=True,
-    )
-    db.add(user)
+    reactivated = existing_user is not None
+    if existing_user:
+        user = existing_user
+        user.password_hash = auth.hash_password(req.password)
+        user.full_name = req.full_name
+        user.role = "realtor"
+        user.is_active = True
+    else:
+        user = User(
+            tenant_id=current_user.tenant_id,
+            email=email,
+            password_hash=auth.hash_password(req.password),
+            full_name=req.full_name,
+            role="realtor",
+            is_active=True,
+        )
+        db.add(user)
     db.commit()
     try:
         if not send_invite_email(email, req.subject, req.html_body, req.text_body):
             raise RuntimeError("SMTP is not configured")
     except Exception as error:
-        db.delete(user)
+        if reactivated:
+            user.is_active = False
+        else:
+            db.delete(user)
         db.commit()
         raise HTTPException(502, f"Invite email could not be sent: {error}")
     return {"ok": True, "user": {"id": user.id, "email": user.email, "full_name": user.full_name,
