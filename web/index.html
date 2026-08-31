@@ -600,14 +600,14 @@
 
       <div class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
         <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style="background:var(--navy-mid)">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Rental Income &amp; Cash Flow</p>
-            <p class="text-xs" style="color:var(--muted)">Adjust the average rent to recalculate the cash-flow figures below.</p>
-          </div>
           <label class="flex items-center gap-2 text-xs" style="color:var(--muted)">
             Average monthly rent
             <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="rentOverride" type="number" min="0" step="50" class="w-28 rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></span>
           </label>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Rental Income &amp; Cash Flow</p>
+            <p class="text-xs" style="color:var(--muted)">Adjust the average rent to recalculate the cash-flow figures below.</p>
+          </div>
         </div>
       </div>
 
@@ -1236,6 +1236,11 @@ function app() {
 
     placeInvestmentCardInReport() {
       this.resetInvestmentCardPosition();
+      const card = this.$refs.investmentCard;
+      const report = this.$root.querySelector('.stream-content');
+      const investmentHeading = [...(report?.querySelectorAll('h1, h2, h3') || [])]
+        .find((heading) => heading.textContent.trim().toLowerCase() === 'investment analysis');
+      if (card && investmentHeading) investmentHeading.after(card);
     },
 
     tryParseScore(text) {
