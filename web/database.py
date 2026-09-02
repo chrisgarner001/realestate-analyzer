@@ -1,5 +1,5 @@
 """
-Database models and session factory for the RE Investor Analyzer.
+Database models and session factory for PropYield.
 Uses PostgreSQL in production (DATABASE_URL env var) or SQLite locally.
 """
 from sqlalchemy import (create_engine, Column, Integer, String, Text, Boolean,
@@ -129,6 +129,34 @@ class BuyerLead(Base):
     buyer_email_sent   = Column(Boolean, default=False)
     sponsor_email_sent = Column(Boolean, default=False)
     created_at         = Column(DateTime, default=datetime.utcnow)
+
+
+class CredentialRegister(Base):
+    """Password-manager references for a tenant; password secrets are never stored."""
+    __tablename__ = "credential_register"
+    id             = Column(Integer, primary_key=True, index=True)
+    tenant_id      = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    portal_name    = Column(String(200), nullable=False)
+    portal_url     = Column(String(2000))
+    admin_username = Column(String(200))
+    vault_name     = Column(String(200), nullable=False)
+    vault_item     = Column(String(500), nullable=False)
+    mfa_status     = Column(String(50), default="Not recorded")
+    access_owner   = Column(String(200))
+    review_due     = Column(String(10))
+    notes          = Column(Text)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash   = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at   = Column(DateTime, nullable=False)
+    used_at      = Column(DateTime)
+    created_at   = Column(DateTime, default=datetime.utcnow)
 
 
 def get_db():

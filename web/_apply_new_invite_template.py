@@ -43,7 +43,7 @@ new_block = r'''      const inviteTeaser = esc(copy.subhead || copy.headline);
   <tr><td class="px" style="padding:22px 32px 20px;background:#FFFFFF;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td width="300" align="left" valign="middle" style="width:300px;">${logo}</td>
-      <td width="236" align="right" valign="middle" style="width:236px;color:#8AA3B0;font-size:10px;letter-spacing:1px;text-transform:uppercase;">In partnership with<br><span style="color:#1596D6;font-weight:bold;font-size:13px;letter-spacing:0;text-transform:none;">PropMind.AI</span></td>
+      <td width="236" align="right" valign="middle" style="width:236px;color:#8AA3B0;font-size:10px;letter-spacing:1px;text-transform:uppercase;">In partnership with<br><span style="color:#1596D6;font-weight:bold;font-size:13px;letter-spacing:0;text-transform:none;">PropYield.AI</span></td>
     </tr></table>
   </td></tr>
 
@@ -96,13 +96,13 @@ new_block = r'''      const inviteTeaser = esc(copy.subhead || copy.headline);
     <div style="color:#FFFFFF;font-size:13px;font-weight:bold;">${contactName}</div>
     <div>${partnerName}</div>
     <div><a href="mailto:${contactEmail}" style="color:#28C5FF;text-decoration:none;">${contactEmail}</a></div>
-    <div style="color:#6E8794;font-size:10px;line-height:1.6;padding-top:16px;border-top:1px solid #1C3F4F;margin-top:16px;">Powered by <span style="color:#28C5FF;font-weight:bold;">PropMind.AI</span> &middot; Questions? <a href="mailto:support@propmind.ai" style="color:#28C5FF;text-decoration:none;">support@propmind.ai</a></div>
+    <div style="color:#6E8794;font-size:10px;line-height:1.6;padding-top:16px;border-top:1px solid #1C3F4F;margin-top:16px;">Powered by <span style="color:#28C5FF;font-weight:bold;">PropYield.AI</span> &middot; Questions? <a href="mailto:support@propmind.ai" style="color:#28C5FF;text-decoration:none;">support@propmind.ai</a></div>
   </td></tr>
 
 </table>
 </td></tr></table>
 </body></html>`;
-      this.inviteText = `Subject: ${copy.subject}\n\nHi ${this.inviteForm.agent_name || 'Agent Name'},\n\n${copy.intro}\n\n${copy.attachment_line}\n\nYour PropMind.AI Account Is Ready\nLogin URL: ${loginUrl}\nEmail: ${this.inviteForm.agent_email || 'agent@company.com'}\nTemporary Password: ${this.inviteForm.temp_password}\n\n${copy.cta}\n\n${this.tenant?.contact_name || 'Your local team'}\n${this.tenant?.company_name || 'Your Team'}`;
+      this.inviteText = `Subject: ${copy.subject}\n\nHi ${this.inviteForm.agent_name || 'Agent Name'},\n\n${copy.intro}\n\n${copy.attachment_line}\n\nYour PropYield.AI Account Is Ready\nLogin URL: ${loginUrl}\nEmail: ${this.inviteForm.agent_email || 'agent@company.com'}\nTemporary Password: ${this.inviteForm.temp_password}\n\n${copy.cta}\n\n${this.tenant?.contact_name || 'Your local team'}\n${this.tenant?.company_name || 'Your Team'}`;
       this.invitePreviewHtml = htmlBody;
     },'''
 

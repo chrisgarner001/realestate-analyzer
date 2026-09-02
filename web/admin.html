@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Dashboard</title>
+<title>PropYield — Admin Dashboard</title>
+<link rel="icon" type="image/png" href="/public/propyield_icon.png">
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
@@ -48,7 +49,7 @@
 <!-- AI Help -->
 <div x-show="helpOpen" x-cloak class="fixed bottom-5 right-5 z-[55] w-[min(92vw,380px)] card rounded-xl shadow-2xl overflow-hidden">
   <div class="px-4 py-3 flex items-center justify-between" style="background:var(--navy-mid)">
-    <div><p class="text-sm font-semibold">PropMind Help</p><p class="text-xs" style="color:var(--muted)">Ask about this admin portal</p></div>
+    <div><p class="text-sm font-semibold">PropYield Help</p><p class="text-xs" style="color:var(--muted)">Ask about this admin portal</p></div>
     <button @click="helpOpen=false" class="text-lg leading-none" style="color:var(--muted)" aria-label="Close help">&times;</button>
   </div>
   <div class="p-3 max-h-80 overflow-y-auto space-y-3" x-ref="helpMessages">
@@ -61,7 +62,7 @@
   <div class="px-3 pb-3 space-y-2">
     <div class="flex flex-wrap gap-1.5"><template x-for="prompt in helpPrompts" :key="prompt"><button @click="askHelp(prompt)" class="text-xs px-2 py-1 rounded" style="background:var(--navy-mid);color:var(--muted)" x-text="prompt"></button></template></div>
     <div class="flex gap-2"><input x-model="helpInput" @keydown.enter="askHelp()" class="flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Ask a question..." aria-label="Help question"><button @click="askHelp()" :disabled="helpLoading||!helpInput.trim()" class="btn-primary px-3 rounded-lg text-sm">Send</button></div>
-    <a href="mailto:support@propmind.ai" class="block text-center text-xs hover:underline" style="color:#93c5fd">Contact PropMind Support: support@propmind.ai</a>
+    <a href="mailto:support@propmind.ai" class="block text-center text-xs hover:underline" style="color:#93c5fd">Contact PropYield Support: support@propmind.ai</a>
   </div>
 </div>
 <button x-show="currentUser" x-cloak @click="helpOpen=!helpOpen" class="fixed bottom-5 right-5 z-[50] rounded-full px-4 py-3 shadow-lg text-sm font-semibold" style="background:var(--brand);color:white" aria-label="Open AI Help">? Help</button>
@@ -80,16 +81,19 @@
       <p class="text-sm mt-1" style="color:var(--muted)">Sign in with your admin account</p>
     </div>
     <div class="card rounded-2xl p-6 space-y-4">
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Email</label>
         <input x-model="loginEmail" type="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="admin@company.com" @keydown.enter="login()">
       </div>
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Password</label>
         <input x-model="loginPassword" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••" @keydown.enter="login()">
       </div>
+        <div x-show="authMode==='forgot'" x-cloak><label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Account Email</label><input x-model="resetEmail" type="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="admin@company.com" @keydown.enter="requestReset()"></div>
+        <div x-show="authMode==='reset'" x-cloak class="space-y-3"><p class="text-sm" style="color:var(--muted)">Choose a new password with at least 8 characters.</p><input x-model="resetPassword" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="New password"><input x-model="resetPasswordConfirm" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="Confirm new password"></div>
       <div x-show="loginError" class="text-xs text-red-400 text-center py-1.5 px-3 rounded" style="background:rgba(239,68,68,.08)" x-text="loginError"></div>
-      <button @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
+        <div x-show="resetMessage" class="text-xs text-center py-1.5 px-3 rounded" :style="resetError?'background:rgba(239,68,68,.08);color:#f87171':'background:rgba(34,197,94,.08);color:#4ade80'" x-text="resetMessage"></div>
+        <button x-show="authMode==='login'" @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
         class="btn-primary w-full font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
         <svg x-show="loginLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -97,6 +101,10 @@
         </svg>
         <span x-text="loginLoading?'Signing in...':'Sign In'"></span>
       </button>
+      <button x-show="authMode==='forgot'" @click="requestReset()" :disabled="resetLoading||!resetEmail" class="btn-primary w-full font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Sending...':'Email Reset Link'"></button>
+      <button x-show="authMode==='reset'" @click="completeReset()" :disabled="resetLoading||resetPassword.length<8||resetPassword!==resetPasswordConfirm" class="btn-primary w-full font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Saving...':'Set New Password'"></button>
+      <button x-show="authMode==='login'" @click="authMode='forgot';resetEmail=loginEmail;resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Forgot password?</button>
+      <button x-show="authMode!=='login'" @click="authMode='login';resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Back to sign in</button>
     </div>
   </div>
 </div>
@@ -140,6 +148,8 @@
         class="text-sm font-medium px-4 py-3.5 transition-colors">Invites</button>
       <button @click="tab='activity';loadActivity()" :class="tab==='activity'?'tab-active':'tab-inactive'"
         class="text-sm font-medium px-4 py-3.5 transition-colors">Activity</button>
+      <button @click="tab='credentials';loadCredentials()" :class="tab==='credentials'?'tab-active':'tab-inactive'"
+        class="text-sm font-medium px-4 py-3.5 transition-colors">Portal Access</button>
       <button @click="tab='branding'" :class="tab==='branding'?'tab-active':'tab-inactive'"
         class="text-sm font-medium px-4 py-3.5 transition-colors">Branding</button>
     </div>
@@ -398,6 +408,34 @@
     </div>
 
     <!-- ── BRANDING TAB ──────────────────────────────────────────────────── -->
+    <div x-show="tab==='credentials'" class="space-y-5">
+      <div class="card rounded-xl p-5">
+        <div class="mb-4">
+          <p class="text-sm font-semibold" style="color:var(--gold-light)">Client Portal Access</p>
+          <p class="text-xs mt-1" style="color:var(--muted)">Record the password-manager location and access review details. Passwords are never entered or stored here.</p>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Portal Name</label><input x-model="credentialForm.portal_name" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Client portal"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Portal URL</label><input x-model="credentialForm.portal_url" type="url" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="https://portal.example.com"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Admin Username / Email</label><input x-model="credentialForm.admin_username" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="admin@client.com"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Password Manager Vault</label><input x-model="credentialForm.vault_name" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Client Portals"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Vault Item</label><input x-model="credentialForm.vault_item" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Exact item title"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">MFA</label><select x-model="credentialForm.mfa_status" class="w-full rounded-lg px-3 py-2.5 text-sm"><option>Enabled</option><option>Not recorded</option><option>Not enabled</option></select></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Access Owner</label><input x-model="credentialForm.access_owner" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="Responsible staff member"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Review Due</label><input x-model="credentialForm.review_due" type="date" class="w-full rounded-lg px-3 py-2.5 text-sm"></div>
+          <div><label class="block text-xs mb-1" style="color:var(--muted)">Notes</label><input x-model="credentialForm.notes" class="w-full rounded-lg px-3 py-2.5 text-sm" placeholder="No passwords or recovery codes"></div>
+        </div>
+        <div class="mt-4 flex justify-end"><button @click="addCredential()" :disabled="savingCredential||!credentialForm.portal_name||!credentialForm.vault_name||!credentialForm.vault_item" class="btn-primary px-4 py-2.5 rounded-lg text-sm font-semibold" x-text="savingCredential?'Saving...':'Add Portal Reference'"></button></div>
+      </div>
+      <div class="card rounded-xl overflow-hidden">
+        <div class="px-5 py-3.5 flex items-center justify-between border-b" style="border-color:var(--border)"><p class="text-sm font-semibold">Registered Portals</p><button @click="loadCredentials()" class="text-xs px-3 py-1.5 rounded-lg" style="background:var(--navy-mid);color:var(--muted)">Refresh</button></div>
+        <div x-show="loadingCredentials" class="p-8 text-center text-sm" style="color:var(--muted)">Loading...</div>
+        <div x-show="!loadingCredentials&&credentials.length===0" class="p-8 text-center text-sm" style="color:var(--muted)">No portal references recorded.</div>
+        <div x-show="!loadingCredentials&&credentials.length>0" class="overflow-x-auto"><table class="w-full"><thead><tr><th>Portal</th><th>Admin Account</th><th>Vault Item</th><th>MFA</th><th>Owner</th><th>Review Due</th><th></th></tr></thead><tbody><template x-for="entry in credentials" :key="entry.id"><tr><td><a x-show="entry.portal_url" :href="entry.portal_url" target="_blank" rel="noopener" class="hover:underline" style="color:#93c5fd" x-text="entry.portal_name"></a><span x-show="!entry.portal_url" x-text="entry.portal_name"></span></td><td x-text="entry.admin_username||'—'"></td><td><span x-text="entry.vault_name"></span><br><span class="text-xs" style="color:var(--muted)" x-text="entry.vault_item"></span></td><td x-text="entry.mfa_status"></td><td x-text="entry.access_owner||'—'"></td><td x-text="entry.review_due||'—'"></td><td><button @click="deleteCredential(entry)" class="text-xs px-2.5 py-1 rounded-lg" style="background:rgba(239,68,68,.1);color:#f87171">Remove</button></td></tr></template></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ── BRANDING TAB ──────────────────────────────────────────────────── -->
     <div x-show="tab==='branding'" class="space-y-5">
       <div class="card rounded-xl p-5 space-y-5">
         <p class="text-sm font-semibold" style="color:var(--gold-light)">Company Branding</p>
@@ -545,6 +583,8 @@ function admin() {
     // Auth
     token: null, currentUser: null, tenant: null, slug: '',
     loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
+    authMode: new URLSearchParams(location.search).get('reset') ? 'reset' : 'login',
+    resetEmail: '', resetToken: new URLSearchParams(location.search).get('reset') || '', resetPassword: '', resetPasswordConfirm: '', resetLoading: false, resetMessage: '', resetError: false,
 
     // Tabs
     tab: 'realtors',
@@ -556,6 +596,10 @@ function admin() {
 
     // Activity
     analyses: [], loadingActivity: false, exportingActivity: false, activitySearch: '', activityPage: 0, activityLimit: 50,
+
+    // Client portal password-manager references. Password secrets are never collected.
+    credentials: [], loadingCredentials: false, savingCredential: false,
+    credentialForm: { portal_name:'', portal_url:'', admin_username:'', vault_name:'', vault_item:'', mfa_status:'Enabled', access_owner:'', review_due:'', notes:'' },
 
     // Branding
     branding: { company_name:'', logo_url:'', primary_color:'#2d8a4e', tagline:'AI-powered property intelligence', welcome_message:'', daily_limit:5,
@@ -572,9 +616,9 @@ function admin() {
     inviteCopy: {
       subject: 'Powerful Property Analysis Tool for Investor Clients',
       eyebrow: 'Help Your Clients Make Better Acquisition Decisions',
-      headline: 'Our PropMind.AI Investor Analysis Tool Brought to You by (Partner)',
+      headline: 'Our PropYield.AI Investor Analysis Tool Brought to You by (Partner)',
       subhead: 'Turn any address into a full investment analysis - offer price, cash flow, comps, and financing - in minutes. It\'s free for you, courtesy of your partner.',
-      intro: 'I wanted to make sure you have access to a tool that makes it much easier to serve investor buyers quickly: PropMind.AI. It\'s free for you to use, and it gives your clients a professional, underwriting-grade analysis in minutes.',
+      intro: 'I wanted to make sure you have access to a tool that makes it much easier to serve investor buyers quickly: PropYield.AI. It\'s free for you to use, and it gives your clients a professional, underwriting-grade analysis in minutes.',
       attachment_line: 'I\'ve attached a real, unedited sample report so you can see exactly what your clients will receive:',
       benefits: [
         { title: 'Win More Deals', text: 'Hand investor buyers real numbers on the spot instead of "let me get back to you."' },
@@ -635,6 +679,19 @@ function admin() {
         await this.loadUsers();
       } catch(e) { this.loginError = 'Connection error.'; }
       finally { this.loginLoading = false; }
+    },
+
+    async requestReset() {
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try { const r = await fetch('/api/auth/forgot-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email:this.resetEmail, slug:this.slug, portal:'admin' }) }); const data = await r.json(); this.resetMessage = data.message || 'Check your email for a password reset link.'; this.resetError = !r.ok; }
+      catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; } finally { this.resetLoading = false; }
+    },
+
+    async completeReset() {
+      if (this.resetPassword !== this.resetPasswordConfirm) { this.resetMessage = 'Passwords do not match.'; this.resetError = true; return; }
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try { const r = await fetch('/api/auth/reset-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:this.resetToken, new_password:this.resetPassword }) }); const data = await r.json(); if (!r.ok) { this.resetMessage = data.detail || 'Unable to reset password.'; this.resetError = true; return; } history.replaceState({}, '', location.pathname); this.authMode = 'login'; this.loginEmail = this.resetEmail; this.resetMessage = data.message; }
+      catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; } finally { this.resetLoading = false; }
     },
 
     logout() {
@@ -759,9 +816,9 @@ function admin() {
       this.inviteCopy = {
         subject: 'Powerful Property Analysis Tool for Investor Clients',
         eyebrow: 'Help Your Clients Make Better Acquisition Decisions',
-        headline: 'Our PropMind.AI Investor Analysis Tool Brought to You by (Partner)',
+        headline: 'Our PropYield.AI Investor Analysis Tool Brought to You by (Partner)',
         subhead: 'Turn any address into a full investment analysis - offer price, cash flow, comps, and financing - in minutes. It\'s free for you, courtesy of your partner.',
-        intro: 'I wanted to make sure you have access to a tool that makes it much easier to serve investor buyers quickly: PropMind.AI. It\'s free for you to use, and it gives your clients a professional, underwriting-grade analysis in minutes.',
+        intro: 'I wanted to make sure you have access to a tool that makes it much easier to serve investor buyers quickly: PropYield.AI. It\'s free for you to use, and it gives your clients a professional, underwriting-grade analysis in minutes.',
         attachment_line: 'I\'ve attached a real, unedited sample report so you can see exactly what your clients will receive:',
         benefits: [
           { title: 'Win More Deals', text: 'Hand investor buyers real numbers on the spot instead of "let me get back to you."' },
@@ -856,7 +913,7 @@ function admin() {
   <tr><td class="px" style="padding:22px 32px 20px;background:#FFFFFF;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td width="300" align="left" valign="middle" style="width:300px;">${logo}</td>
-      <td width="236" align="right" valign="middle" style="width:236px;color:#8AA3B0;font-size:10px;letter-spacing:1px;text-transform:uppercase;">In partnership with<br><span style="color:#1596D6;font-weight:bold;font-size:13px;letter-spacing:0;text-transform:none;">PropMind.AI</span></td>
+      <td width="236" align="right" valign="middle" style="width:236px;color:#8AA3B0;font-size:10px;letter-spacing:1px;text-transform:uppercase;">In partnership with<br><span style="color:#1596D6;font-weight:bold;font-size:13px;letter-spacing:0;text-transform:none;">PropYield.AI</span></td>
     </tr></table>
   </td></tr>
 
@@ -909,13 +966,13 @@ function admin() {
     <div style="color:#FFFFFF;font-size:13px;font-weight:bold;">${contactName}</div>
     <div>${partnerName}</div>
     <div><a href="mailto:${contactEmail}" style="color:#28C5FF;text-decoration:none;">${contactEmail}</a></div>
-    <div style="color:#6E8794;font-size:10px;line-height:1.6;padding-top:16px;border-top:1px solid #1C3F4F;margin-top:16px;">Powered by <span style="color:#28C5FF;font-weight:bold;">PropMind.AI</span> &middot; Questions? <a href="mailto:support@propmind.ai" style="color:#28C5FF;text-decoration:none;">support@propmind.ai</a></div>
+    <div style="color:#6E8794;font-size:10px;line-height:1.6;padding-top:16px;border-top:1px solid #1C3F4F;margin-top:16px;">Powered by <span style="color:#28C5FF;font-weight:bold;">PropYield.AI</span> &middot; Questions? <a href="mailto:support@propmind.ai" style="color:#28C5FF;text-decoration:none;">support@propmind.ai</a></div>
   </td></tr>
 
 </table>
 </td></tr></table>
 </body></html>`;
-      this.inviteText = `Subject: ${copy.subject}\n\nHi ${this.inviteForm.agent_name || 'Agent Name'},\n\n${copy.intro}\n\n${copy.attachment_line}\n\nYour PropMind.AI Account Is Ready\nLogin URL: ${loginUrl}\nEmail: ${this.inviteForm.agent_email || 'agent@company.com'}\nTemporary Password: ${this.inviteForm.temp_password}\n\n${copy.cta}\n\n${this.tenant?.contact_name || 'Your local team'}\n${this.tenant?.company_name || 'Your Team'}`;
+      this.inviteText = `Subject: ${copy.subject}\n\nHi ${this.inviteForm.agent_name || 'Agent Name'},\n\n${copy.intro}\n\n${copy.attachment_line}\n\nYour PropYield.AI Account Is Ready\nLogin URL: ${loginUrl}\nEmail: ${this.inviteForm.agent_email || 'agent@company.com'}\nTemporary Password: ${this.inviteForm.temp_password}\n\n${copy.cta}\n\n${this.tenant?.contact_name || 'Your local team'}\n${this.tenant?.company_name || 'Your Team'}`;
       this.invitePreviewHtml = htmlBody;
     },
 
@@ -947,7 +1004,7 @@ function admin() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `propmind-agent-invite-${(this.inviteForm.agent_name || 'agent').replace(/\s+/g, '-')}.${format}`;
+      a.download = `propyield-agent-invite-${(this.inviteForm.agent_name || 'agent').replace(/\s+/g, '-')}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     },
@@ -1038,6 +1095,43 @@ function admin() {
         const r = await fetch(`/api/admin/analyses?${params}`, { headers: this.authHeaders() });
         if (r.ok) this.analyses = await r.json();
       } finally { this.loadingActivity = false; }
+    },
+
+    async loadCredentials() {
+      this.loadingCredentials = true;
+      try {
+        const r = await fetch('/api/admin/credential-register', { headers: this.authHeaders() });
+        if (r.ok) this.credentials = await r.json();
+      } finally { this.loadingCredentials = false; }
+    },
+
+    async addCredential() {
+      this.savingCredential = true; this.userMsg = '';
+      try {
+        const r = await fetch('/api/admin/credential-register', {
+          method: 'POST', headers: { ...this.authHeaders(), 'Content-Type':'application/json' },
+          body: JSON.stringify(this.credentialForm)
+        });
+        const data = await r.json();
+        if (!r.ok) { this.userMsg = data.detail || 'Unable to add portal reference'; this.userMsgType = 'err'; return; }
+        this.credentials.push(data);
+        this.credentials.sort((a, b) => a.portal_name.localeCompare(b.portal_name));
+        this.credentialForm = { portal_name:'', portal_url:'', admin_username:'', vault_name:'', vault_item:'', mfa_status:'Enabled', access_owner:'', review_due:'', notes:'' };
+        this.userMsg = 'Portal reference added'; this.userMsgType = 'ok';
+      } catch(e) { this.userMsg = 'Connection error'; this.userMsgType = 'err'; }
+      finally { this.savingCredential = false; setTimeout(()=>this.userMsg='', 4000); }
+    },
+
+    async deleteCredential(entry) {
+      if (!window.confirm(`Remove the ${entry.portal_name} portal reference?`)) return;
+      try {
+        const r = await fetch(`/api/admin/credential-register/${entry.id}`, { method: 'DELETE', headers: this.authHeaders() });
+        const data = await r.json().catch(()=>({}));
+        if (!r.ok) { this.userMsg = data.detail || 'Unable to remove portal reference'; this.userMsgType = 'err'; return; }
+        this.credentials = this.credentials.filter(item => item.id !== entry.id);
+        this.userMsg = 'Portal reference removed'; this.userMsgType = 'ok';
+      } catch(e) { this.userMsg = 'Connection error'; this.userMsgType = 'err'; }
+      setTimeout(()=>this.userMsg='', 4000);
     },
 
     async exportActivity() {

@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>PropMind — AI Property Analyzer</title>
+<title>PropYield — AI Property Analyzer</title>
+<link rel="icon" type="image/png" href="/public/propyield_icon.png">
+<link rel="apple-touch-icon" href="/public/propyield_icon.png">
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
@@ -93,35 +95,36 @@
         <img :src="tenant&&tenant.logo_url" alt="logo" class="h-14 object-contain rounded-lg">
       </div>
       <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="mb-3 flex justify-center">
-        <div class="w-14 h-14 rounded-2xl flex items-center justify-center brand-accent">
-          <svg class="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-          </svg>
+        <div class="w-14 h-14 rounded-2xl flex items-center justify-center overflow-hidden brand-accent">
+          <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
         </div>
       </div>
-      <h2 class="text-xl font-bold" x-text="tenant&&tenant.company_name?tenant.company_name:'RE Investor Analyzer'"></h2>
+      <h2 class="text-xl font-bold" x-text="tenant&&tenant.company_name?tenant.company_name:'PropYield'"></h2>
       <p class="text-sm mt-1" style="color:var(--muted)" x-text="tenant&&tenant.welcome_message?tenant.welcome_message:'Sign in to access your property analysis tools'"></p>
     </div>
 
     <!-- Form -->
     <div class="login-card rounded-2xl p-6 space-y-4">
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Email Address</label>
         <input x-model="loginEmail" type="email" autocomplete="email" inputmode="email"
           class="w-full rounded-lg px-4 py-3 text-sm" placeholder="you@example.com"
           @keydown.enter="login()">
       </div>
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Password</label>
         <input x-model="loginPassword" type="password" autocomplete="current-password"
           class="w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••"
           @keydown.enter="login()">
       </div>
+          <div x-show="authMode==='forgot'" x-cloak><label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Account Email</label><input x-model="resetEmail" type="email" autocomplete="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="you@example.com" @keydown.enter="requestReset()"></div>
+          <div x-show="authMode==='reset'" x-cloak class="space-y-3"><p class="text-sm" style="color:var(--muted)">Choose a new password with at least 8 characters.</p><input x-model="resetPassword" type="password" autocomplete="new-password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="New password"><input x-model="resetPasswordConfirm" type="password" autocomplete="new-password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="Confirm new password"></div>
 
       <!-- Error -->
       <div x-show="loginError" class="text-xs text-red-400 text-center px-2 py-2 rounded-lg" style="background:rgba(239,68,68,0.08)" x-text="loginError"></div>
+          <div x-show="resetMessage" class="text-xs text-center px-2 py-2 rounded-lg" :style="resetError?'background:rgba(239,68,68,.08);color:#f87171':'background:rgba(34,197,94,.08);color:#4ade80'" x-text="resetMessage"></div>
 
-      <button @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
+          <button x-show="authMode==='login'" @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
         class="btn-login w-full text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
         <svg x-show="loginLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -129,6 +132,10 @@
         </svg>
         <span x-text="loginLoading?'Signing in...':'Sign In'"></span>
       </button>
+      <button x-show="authMode==='forgot'" @click="requestReset()" :disabled="resetLoading||!resetEmail" class="btn-login w-full text-white font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Sending...':'Email Reset Link'"></button>
+      <button x-show="authMode==='reset'" @click="completeReset()" :disabled="resetLoading||resetPassword.length<8||resetPassword!==resetPasswordConfirm" class="btn-login w-full text-white font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Saving...':'Set New Password'"></button>
+      <button x-show="authMode==='login'" @click="authMode='forgot';resetEmail=loginEmail;resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Forgot password?</button>
+      <button x-show="authMode!=='login'" @click="authMode='login';resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Back to sign in</button>
     </div>
 
     <!-- Contact footer -->
@@ -155,13 +162,11 @@
     <div x-show="tenant&&tenant.logo_url" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--navy-mid)">
       <img :src="tenant&&tenant.logo_url" alt="Company logo" class="w-full h-full object-contain">
     </div>
-    <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--green)">
-      <svg class="w-4 h-4 sm:w-5 sm:h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-      </svg>
+    <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--green)">
+      <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
     </div>
     <div>
-      <h1 class="text-sm sm:text-base font-bold tracking-tight leading-tight" x-text="tenant&&tenant.company_name?tenant.company_name:'RE Investor Analyzer'"></h1>
+      <h1 class="text-sm sm:text-base font-bold tracking-tight leading-tight" x-text="tenant&&tenant.company_name?tenant.company_name:'PropYield'"></h1>
       <p class="text-xs hidden sm:block" style="color:var(--muted)" x-text="tenant&&tenant.tagline?tenant.tagline:'AI-powered property intelligence'"></p>
     </div>
   </div>
@@ -472,20 +477,74 @@
       </div>
     </div>
 
-    <div x-show="getComparableSales().length||getRentalComparables().length" class="card rounded-xl p-4 sm:p-5 space-y-5">
+    <div x-show="scoreData!==null" class="card rounded-xl p-4 sm:p-5 space-y-5">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div><p class="text-xs font-medium" style="color:var(--muted)">COMPARABLE REVIEW</p><p class="mt-1 text-xs" style="color:var(--muted)">Sources, recency, and selection rationale are provided for review before relying on the analysis.</p></div>
         <div x-show="getComparableSales().length" class="text-right"><p class="text-xs" style="color:var(--muted)">Selected sale comp average</p><p class="text-lg font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSelectedSaleCompAverage())"></p></div>
       </div>
-      <div x-show="getComparableSales().length" class="overflow-x-auto">
-        <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">SALE COMPARABLES</p>
-        <table class="w-full min-w-[680px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property</th><th class="p-2 text-left">Recorded sale</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left">Why selected / adjustments</th></tr></thead><tbody><template x-for="(comp,index) in getComparableSales()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isSaleCompSelected(index)" @change="toggleSaleComp(index)" aria-label="Include sale comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="[comp.property_type, comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf'].filter(Boolean).join(' · ')"></span></td><td class="p-2"><strong x-text="formatCurrency(getSaleCompValue(comp))"></strong><br><span style="color:var(--muted)" x-text="comp.distance"></span></td><td class="p-2" x-text="[comp.source,comp.sale_date].filter(Boolean).join(' · ')"></td><td class="p-2" style="color:var(--muted)"><span x-text="comp.selection_rationale"></span><span x-show="comp.adjustment_notes"><br><span x-text="comp.adjustment_notes"></span></span></td></tr></template></tbody></table>
+      <div class="overflow-x-auto">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold" style="color:var(--gold-light)">SALE COMPARABLES</p>
+          <button type="button" x-show="!newSaleComp" @click="startNewSaleComp()" class="text-xs font-semibold" style="color:var(--gold-light)">+ Add sale comp</button>
+        </div>
+        <table x-show="getComparableSales().length||newSaleComp" class="w-full min-w-[680px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property</th><th class="p-2 text-left">Recorded sale</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left">Why selected / adjustments</th><th class="p-2 text-left"></th></tr></thead><tbody>
+          <template x-for="(comp,index) in getComparableSales()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isSaleCompSelected(index)" @change="toggleSaleComp(index)" aria-label="Include sale comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="[comp.property_type, comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf'].filter(Boolean).join(' · ')"></span></td><td class="p-2"><strong x-text="formatCurrency(getSaleCompValue(comp))"></strong><br><span style="color:var(--muted)" x-text="comp.distance"></span></td><td class="p-2" x-text="[comp.source,comp.sale_date].filter(Boolean).join(' · ')"></td><td class="p-2" style="color:var(--muted)"><span x-text="comp.selection_rationale"></span><span x-show="comp.adjustment_notes"><br><span x-text="comp.adjustment_notes"></span></span></td><td class="p-2"><button type="button" x-show="comp.isCustom" @click="removeSaleComp(index)" class="text-xs" style="color:var(--muted)" aria-label="Remove sale comparable">✕</button></td></tr></template>
+          <tr x-show="newSaleComp" style="border-top:1px solid var(--border)">
+            <td class="p-2"></td>
+            <td class="p-2 space-y-1">
+              <input x-model="newSaleComp.address" type="text" placeholder="Address" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newSaleComp.property_type" type="text" placeholder="Property type / beds-baths / sqft" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2 space-y-1">
+              <input x-model="newSaleComp.sale_price" type="number" placeholder="Sale price" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newSaleComp.distance" type="text" placeholder="Distance" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2 space-y-1">
+              <input x-model="newSaleComp.source" type="text" placeholder="Source" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newSaleComp.sale_date" type="text" placeholder="Sale date" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2"><input x-model="newSaleComp.selection_rationale" type="text" placeholder="Why selected" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></td>
+            <td class="p-2 whitespace-nowrap">
+              <button type="button" @click="addSaleComp()" class="text-xs font-semibold" style="color:var(--gold-light)">Save</button>
+              <button type="button" @click="cancelNewSaleComp()" class="text-xs ml-2" style="color:var(--muted)">Cancel</button>
+            </td>
+          </tr>
+        </tbody></table>
       </div>
-      <div x-show="getRentalComparables().length" class="overflow-x-auto">
-        <p class="mb-2 text-xs font-semibold" style="color:var(--gold-light)">RENTAL COMPARABLES</p>
-        <table class="w-full min-w-[620px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Property / neighborhood</th><th class="p-2 text-left">Rent</th><th class="p-2 text-left">Details</th><th class="p-2 text-left">Source / date</th></tr></thead><tbody><template x-for="(comp,index) in getRentalComparables()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="comp.neighborhood"></span></td><td class="p-2 font-semibold" x-text="formatCurrency(comp.monthly_rent)"></td><td class="p-2" style="color:var(--muted)" x-text="[comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf', comp.distance, comp.condition_features].filter(Boolean).join(' · ')"></td><td class="p-2" x-text="[comp.source,comp.listed_or_leased_date].filter(Boolean).join(' · ')"></td></tr></template></tbody></table>
+      <div class="overflow-x-auto">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold" style="color:var(--gold-light)">RENTAL COMPARABLES</p>
+          <div class="flex items-center gap-3">
+            <span x-show="getRentalComparables().length" class="text-xs" style="color:var(--muted)">Selected rent avg: <strong style="color:var(--gold-light)" x-text="formatCurrency(getSelectedRentalCompAverage())"></strong></span>
+            <button type="button" x-show="!newRentalComp" @click="startNewRentalComp()" class="text-xs font-semibold" style="color:var(--gold-light)">+ Add rental comp</button>
+          </div>
+        </div>
+        <table x-show="getRentalComparables().length||newRentalComp" class="w-full min-w-[620px] text-xs"><thead><tr style="background:var(--navy-mid);color:var(--gold-light)"><th class="p-2 text-left">Use</th><th class="p-2 text-left">Property / neighborhood</th><th class="p-2 text-left">Rent</th><th class="p-2 text-left">Details</th><th class="p-2 text-left">Source / date</th><th class="p-2 text-left"></th></tr></thead><tbody>
+          <template x-for="(comp,index) in getRentalComparables()" :key="comp.address+index"><tr style="border-top:1px solid var(--border)"><td class="p-2"><input type="checkbox" :checked="isRentalCompSelected(index)" @change="toggleRentalComp(index)" aria-label="Include rental comparable"></td><td class="p-2"><strong x-text="comp.address"></strong><br><span style="color:var(--muted)" x-text="comp.neighborhood"></span></td><td class="p-2 font-semibold" x-text="formatCurrency(comp.monthly_rent)"></td><td class="p-2" style="color:var(--muted)" x-text="[comp.beds&&comp.baths?comp.beds+' bd / '+comp.baths+' ba':'', comp.sqft&&Number(comp.sqft).toLocaleString()+' sf', comp.distance, comp.condition_features].filter(Boolean).join(' · ')"></td><td class="p-2" x-text="[comp.source,comp.listed_or_leased_date].filter(Boolean).join(' · ')"></td><td class="p-2"><button type="button" x-show="comp.isCustom" @click="removeRentalComp(index)" class="text-xs" style="color:var(--muted)" aria-label="Remove rental comparable">✕</button></td></tr></template>
+          <tr x-show="newRentalComp" style="border-top:1px solid var(--border)">
+            <td class="p-2"></td>
+            <td class="p-2 space-y-1">
+              <input x-model="newRentalComp.address" type="text" placeholder="Address" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newRentalComp.neighborhood" type="text" placeholder="Neighborhood" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2"><input x-model="newRentalComp.monthly_rent" type="number" placeholder="Monthly rent" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)"></td>
+            <td class="p-2 space-y-1">
+              <input x-model="newRentalComp.condition_features" type="text" placeholder="Beds/baths, sqft, condition" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newRentalComp.distance" type="text" placeholder="Distance" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2 space-y-1">
+              <input x-model="newRentalComp.source" type="text" placeholder="Source" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+              <input x-model="newRentalComp.listed_or_leased_date" type="text" placeholder="Listed/leased date" class="w-full rounded px-2 py-1" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            </td>
+            <td class="p-2 whitespace-nowrap">
+              <button type="button" @click="addRentalComp()" class="text-xs font-semibold" style="color:var(--gold-light)">Save</button>
+              <button type="button" @click="cancelNewRentalComp()" class="text-xs ml-2" style="color:var(--muted)">Cancel</button>
+            </td>
+          </tr>
+        </tbody></table>
       </div>
     </div>
+
 
     <!-- Score Dashboard -->
     <div x-show="scoreData!==null" class="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
@@ -1040,7 +1099,7 @@
 <!-- AI Help -->
 <div x-show="helpOpen" x-cloak class="fixed bottom-5 right-5 z-[55] w-[min(92vw,380px)] card rounded-xl shadow-2xl overflow-hidden">
   <div class="px-4 py-3 flex items-center justify-between" style="background:var(--navy-mid)">
-    <div><p class="text-sm font-semibold">PropMind Help</p><p class="text-xs" style="color:var(--muted)">Ask about this property portal</p></div>
+    <div><p class="text-sm font-semibold">PropYield Help</p><p class="text-xs" style="color:var(--muted)">Ask about this property portal</p></div>
     <button @click="helpOpen=false" class="text-lg leading-none" style="color:var(--muted)" aria-label="Close help">&times;</button>
   </div>
   <div class="p-3 max-h-80 overflow-y-auto space-y-3" x-ref="helpMessages">
@@ -1053,7 +1112,7 @@
   <div class="px-3 pb-3 space-y-2">
     <div class="flex flex-wrap gap-1.5"><template x-for="prompt in helpPrompts" :key="prompt"><button @click="askHelp(prompt)" class="text-xs px-2 py-1 rounded" style="background:var(--navy-mid);color:var(--muted)" x-text="prompt"></button></template></div>
     <div class="flex gap-2"><input x-model="helpInput" @keydown.enter="askHelp()" class="flex-1 rounded-lg px-3 py-2 text-sm" placeholder="Ask a question..." aria-label="Help question"><button @click="askHelp()" :disabled="helpLoading||!helpInput.trim()" class="btn-analyze px-3 rounded-lg text-sm text-white">Send</button></div>
-    <a href="mailto:support@propmind.ai" class="block text-center text-xs hover:underline" style="color:#93c5fd">Contact PropMind Support: support@propmind.ai</a>
+    <a href="mailto:support@propmind.ai" class="block text-center text-xs hover:underline" style="color:#93c5fd">Contact PropYield Support: support@propmind.ai</a>
   </div>
 </div>
 <button x-show="currentUser" x-cloak @click="helpOpen=!helpOpen" class="fixed bottom-20 sm:bottom-5 right-5 z-[50] rounded-full px-4 py-3 shadow-lg text-sm font-semibold" style="background:var(--green);color:white" aria-label="Open AI Help">? Help</button>
@@ -1079,6 +1138,8 @@ function app() {
     slug: _slug,
     showLogin: !!_slug,   // login shown immediately on tenant URLs — no blank flash
     loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
+    authMode: new URLSearchParams(location.search).get('reset') ? 'reset' : 'login',
+    resetEmail: '', resetToken: new URLSearchParams(location.search).get('reset') || '', resetPassword: '', resetPasswordConfirm: '', resetLoading: false, resetMessage: '', resetError: false,
     usageCount: 0, usageLimit: 5,
     reports: [], historyOpen: false, loadingHistory: false,
     // ── Analysis state ──────────────────────────────────────────────
@@ -1093,7 +1154,8 @@ function app() {
     interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2, propertyTaxMonthlyOverride: '', insuranceRate: 0.5, insuranceMonthlyOverride: '',
     rentOverride: '', suggestedOfferOverride: '', arvOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
     landContractRate: 8.0, landContractTermYears: 30,
-    saleCompSelections: {},
+    saleCompSelections: {}, rentalCompSelections: {}, customSaleComps: [], customRentalComps: [],
+    newSaleComp: null, newRentalComp: null,
     statusIndex: 0, statusTimer: null,
     analysisStatuses: [
       { label:'Connecting to market data', detail:'Gathering current property and neighborhood information' },
@@ -1198,6 +1260,27 @@ function app() {
       } finally {
         this.loginLoading = false;
       }
+    },
+
+    async requestReset() {
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try {
+        const r = await fetch('/api/auth/forgot-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email:this.resetEmail, slug:this.slug, portal:'tenant' }) });
+        const data = await r.json(); this.resetMessage = data.message || 'Check your email for a password reset link.'; this.resetError = !r.ok;
+      } catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; }
+      finally { this.resetLoading = false; }
+    },
+
+    async completeReset() {
+      if (this.resetPassword !== this.resetPasswordConfirm) { this.resetMessage = 'Passwords do not match.'; this.resetError = true; return; }
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try {
+        const r = await fetch('/api/auth/reset-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:this.resetToken, new_password:this.resetPassword }) });
+        const data = await r.json();
+        if (!r.ok) { this.resetMessage = data.detail || 'Unable to reset password.'; this.resetError = true; return; }
+        history.replaceState({}, '', location.pathname); this.authMode = 'login'; this.loginEmail = this.resetEmail; this.resetMessage = data.message;
+      } catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; }
+      finally { this.resetLoading = false; }
     },
 
     logout() {
@@ -1411,7 +1494,12 @@ function app() {
           distance: comp.distance ?? '', sale_date: comp.sale_date ?? '', source: comp.source ?? '',
           selection_rationale: comp.selection_rationale ?? '', adjustment_notes: comp.adjustment_notes ?? '',
         })));
-        if (this.getRentalComparables().length) appendSheet('Rental Comparables', this.getRentalComparables());
+        if (this.getRentalComparables().length) appendSheet('Rental Comparables', this.getRentalComparables().map((comp, index) => ({
+          included: this.isRentalCompSelected(index) ? 'Yes' : 'No', address: comp.address ?? '', neighborhood: comp.neighborhood ?? '',
+          monthly_rent: comp.monthly_rent ?? '', beds: comp.beds ?? '', baths: comp.baths ?? '', sqft: comp.sqft ?? '',
+          distance: comp.distance ?? '', condition_features: comp.condition_features ?? '',
+          source: comp.source ?? '', listed_or_leased_date: comp.listed_or_leased_date ?? '',
+        })));
         const address = (this.address || 'property-analysis').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40);
         XLSX.writeFile(workbook, `property-underwriting-${address}.xlsx`);
       } finally {
@@ -1534,7 +1622,28 @@ function app() {
     },
 
     getComparableSales() {
-      return Array.isArray(this.scoreData?.comparable_sales) ? this.scoreData.comparable_sales : [];
+      const reported = Array.isArray(this.scoreData?.comparable_sales) ? this.scoreData.comparable_sales : [];
+      return [...reported, ...this.customSaleComps];
+    },
+
+    startNewSaleComp() {
+      this.newSaleComp = { address:'', sale_price:'', property_type:'', beds:'', baths:'', sqft:'', distance:'', sale_date:'', source:'', selection_rationale:'' };
+    },
+
+    cancelNewSaleComp() {
+      this.newSaleComp = null;
+    },
+
+    addSaleComp() {
+      if (!this.newSaleComp?.address || !this.newSaleComp?.sale_price) return;
+      this.customSaleComps.push({ ...this.newSaleComp, isCustom: true });
+      this.newSaleComp = null;
+    },
+
+    removeSaleComp(index) {
+      const reportedCount = Array.isArray(this.scoreData?.comparable_sales) ? this.scoreData.comparable_sales.length : 0;
+      this.customSaleComps.splice(index - reportedCount, 1);
+      delete this.saleCompSelections[index];
     },
 
     getReportSuggestedOffer() {
@@ -1590,7 +1699,44 @@ function app() {
     },
 
     getRentalComparables() {
-      return Array.isArray(this.scoreData?.rental_comparables) ? this.scoreData.rental_comparables : [];
+      const reported = Array.isArray(this.scoreData?.rental_comparables) ? this.scoreData.rental_comparables : [];
+      return [...reported, ...this.customRentalComps];
+    },
+
+    startNewRentalComp() {
+      this.newRentalComp = { address:'', neighborhood:'', monthly_rent:'', beds:'', baths:'', sqft:'', distance:'', condition_features:'', source:'', listed_or_leased_date:'' };
+    },
+
+    cancelNewRentalComp() {
+      this.newRentalComp = null;
+    },
+
+    addRentalComp() {
+      if (!this.newRentalComp?.address || !this.newRentalComp?.monthly_rent) return;
+      this.customRentalComps.push({ ...this.newRentalComp, isCustom: true });
+      this.newRentalComp = null;
+    },
+
+    removeRentalComp(index) {
+      const reportedCount = Array.isArray(this.scoreData?.rental_comparables) ? this.scoreData.rental_comparables.length : 0;
+      this.customRentalComps.splice(index - reportedCount, 1);
+      delete this.rentalCompSelections[index];
+    },
+
+    isRentalCompSelected(index) {
+      return this.rentalCompSelections[index] !== false;
+    },
+
+    toggleRentalComp(index) {
+      this.rentalCompSelections[index] = !this.isRentalCompSelected(index);
+    },
+
+    getSelectedRentalCompAverage() {
+      const values = this.getRentalComparables()
+        .filter((comp, index) => this.isRentalCompSelected(index))
+        .map((comp) => parseFloat(String(comp.monthly_rent).replace(/[^0-9.]/g, '')))
+        .filter((value) => value > 0);
+      return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
     },
 
     getSaleCompValue(comp) {
@@ -1857,7 +2003,7 @@ function app() {
       if (!this.canAnalyze()||this.analyzing) return;
       this.address = this.getComposedAddress();
       this.resetInvestmentCardPosition();
-      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.rentOverride=''; this.suggestedOfferOverride=''; this.arvOverride='';
+      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.rentalCompSelections={}; this.customSaleComps=[]; this.customRentalComps=[]; this.newSaleComp=null; this.newRentalComp=null; this.rentOverride=''; this.suggestedOfferOverride=''; this.arvOverride='';
       this.statusIndex=0;
       clearInterval(this.statusTimer);
       this.statusTimer=setInterval(()=>{ this.statusIndex=(this.statusIndex+1)%this.analysisStatuses.length; }, 3500);

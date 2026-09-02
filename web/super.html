@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Superadmin — RE Analyzer</title>
+<title>Superadmin — PropYield</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
@@ -41,25 +41,26 @@
 <div x-show="!currentUser" x-cloak class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background:var(--navy-deep)">
   <div class="w-full max-w-sm">
     <div class="text-center mb-6">
-      <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:var(--green)">
-        <svg class="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-        </svg>
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 overflow-hidden" style="background:var(--green)">
+        <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
       </div>
       <h2 class="text-xl font-bold">Superadmin</h2>
-      <p class="text-sm mt-1" style="color:var(--muted)">RE Investor Analyzer — Platform Control</p>
+      <p class="text-sm mt-1" style="color:var(--muted)">PropYield — Platform Control</p>
     </div>
     <div class="card rounded-2xl p-6 space-y-4">
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Email</label>
         <input x-model="loginEmail" type="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="admin@yourapp.com" @keydown.enter="login()">
       </div>
-      <div>
+      <div x-show="authMode==='login'">
         <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Password</label>
         <input x-model="loginPassword" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="••••••••" @keydown.enter="login()">
       </div>
+      <div x-show="authMode==='forgot'" x-cloak><label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Account Email</label><input x-model="resetEmail" type="email" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="admin@yourapp.com" @keydown.enter="requestReset()"></div>
+      <div x-show="authMode==='reset'" x-cloak class="space-y-3"><p class="text-sm" style="color:var(--muted)">Choose a new password with at least 8 characters.</p><input x-model="resetPassword" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="New password"><input x-model="resetPasswordConfirm" type="password" class="w-full rounded-lg px-4 py-3 text-sm" placeholder="Confirm new password"></div>
       <div x-show="loginError" class="text-xs text-red-400 text-center py-1.5 px-3 rounded" style="background:rgba(239,68,68,.08)" x-text="loginError"></div>
-      <button @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
+      <div x-show="resetMessage" class="text-xs text-center py-1.5 px-3 rounded" :style="resetError?'background:rgba(239,68,68,.08);color:#f87171':'background:rgba(34,197,94,.08);color:#4ade80'" x-text="resetMessage"></div>
+      <button x-show="authMode==='login'" @click="login()" :disabled="loginLoading||!loginEmail||!loginPassword"
         class="btn-primary w-full font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
         <svg x-show="loginLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -67,6 +68,10 @@
         </svg>
         <span x-text="loginLoading?'Signing in...':'Sign In'"></span>
       </button>
+      <button x-show="authMode==='forgot'" @click="requestReset()" :disabled="resetLoading||!resetEmail" class="btn-primary w-full font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Sending...':'Email Reset Link'"></button>
+      <button x-show="authMode==='reset'" @click="completeReset()" :disabled="resetLoading||resetPassword.length<8||resetPassword!==resetPasswordConfirm" class="btn-primary w-full font-semibold py-3 rounded-xl text-sm" x-text="resetLoading?'Saving...':'Set New Password'"></button>
+      <button x-show="authMode==='login'" @click="authMode='forgot';resetEmail=loginEmail;resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Forgot password?</button>
+      <button x-show="authMode!=='login'" @click="authMode='login';resetMessage=''" class="w-full text-xs hover:underline" style="color:var(--muted)">Back to sign in</button>
     </div>
   </div>
 </div>
@@ -77,14 +82,12 @@
   <!-- Header -->
   <header class="card border-b border-gray-700/50 px-6 py-4 flex items-center justify-between sticky top-0 z-40">
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:var(--green)">
-        <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-        </svg>
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden" style="background:var(--green)">
+        <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
       </div>
       <div>
         <p class="text-sm font-bold">Platform Superadmin</p>
-        <p class="text-xs" style="color:var(--muted)">RE Investor Analyzer</p>
+        <p class="text-xs" style="color:var(--muted)">PropYield</p>
       </div>
     </div>
     <div class="flex items-center gap-3">
@@ -324,6 +327,8 @@ function superadmin() {
   return {
     token: null, currentUser: null,
     loginEmail: '', loginPassword: '', loginError: '', loginLoading: false,
+    authMode: new URLSearchParams(location.search).get('reset') ? 'reset' : 'login',
+    resetEmail: '', resetToken: new URLSearchParams(location.search).get('reset') || '', resetPassword: '', resetPasswordConfirm: '', resetLoading: false, resetMessage: '', resetError: false,
 
     tab: 'tenants',
 
@@ -375,6 +380,19 @@ function superadmin() {
         await this.loadTenants();
       } catch(e) { this.loginError = 'Connection error.'; }
       finally { this.loginLoading = false; }
+    },
+
+    async requestReset() {
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try { const r = await fetch('/api/auth/forgot-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email:this.resetEmail, portal:'super' }) }); const data = await r.json(); this.resetMessage = data.message || 'Check your email for a password reset link.'; this.resetError = !r.ok; }
+      catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; } finally { this.resetLoading = false; }
+    },
+
+    async completeReset() {
+      if (this.resetPassword !== this.resetPasswordConfirm) { this.resetMessage = 'Passwords do not match.'; this.resetError = true; return; }
+      this.resetLoading = true; this.resetMessage = ''; this.resetError = false;
+      try { const r = await fetch('/api/auth/reset-password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token:this.resetToken, new_password:this.resetPassword }) }); const data = await r.json(); if (!r.ok) { this.resetMessage = data.detail || 'Unable to reset password.'; this.resetError = true; return; } history.replaceState({}, '', location.pathname); this.authMode = 'login'; this.loginEmail = this.resetEmail; this.resetMessage = data.message; }
+      catch(e) { this.resetMessage = 'Connection error. Please try again.'; this.resetError = true; } finally { this.resetLoading = false; }
     },
 
     logout() {

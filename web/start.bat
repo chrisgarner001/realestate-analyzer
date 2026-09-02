@@ -1,5 +1,5 @@
 @echo off
-title PropMind Server
+title PropYield Server
 cd /d "%~dp0"
 
 :: Kill anything already on port 8000
@@ -13,7 +13,7 @@ set PYTHONIOENCODING=utf-8
 chcp 65001 >nul
 
 echo.
-echo  PropMind Server starting...
+echo  PropYield Server starting...
 echo  Open: http://localhost:8000/test
 echo.
 
