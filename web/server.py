@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="PropYield — AI Property Analyzer", lifespan=lifespan)
-app.mount("/public", StaticFiles(directory=Path(__file__).parent / "public"), name="public")
+app.mount("/public", StaticFiles(directory=Path(__file__).parent / "assets"), name="public")
 
 ALLOWED_ORIGINS = [
     "https://www.propmind.ai",
