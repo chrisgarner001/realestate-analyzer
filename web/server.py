@@ -19,9 +19,10 @@ import uvicorn
 import anthropic
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
-import database, auth
-from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken
+import database, auth, property_tax
+from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken, MillageRate
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -65,8 +66,8 @@ def get_client():
 
 class AnalysisRequest(BaseModel):
     address: str
-    buyer_name: str
-    buyer_email: str
+    buyer_name: Optional[str] = None
+    buyer_email: Optional[str] = None
     analysis_type: str = "full"
     asking_price: Optional[str] = None
     rehab_cost: Optional[str] = None   # user's rehab/construction estimate
@@ -78,8 +79,52 @@ class AnalysisRequest(BaseModel):
     property_type: Optional[str] = None
     hoa: Optional[str] = None
     address2: Optional[str] = None     # for compare
+    owner_occupied: bool = False       # False = investor / non-homestead tax treatment
+    tax_county: Optional[str] = None
+    tax_jurisdiction: Optional[str] = None
+    tax_school_district: Optional[str] = None
+    seller_taxable_value: Optional[str] = None
 
-def property_context(req: AnalysisRequest) -> str:
+def tax_context(req: AnalysisRequest, db: Optional[Session] = None) -> str:
+    """Give the model the computed tax instead of letting it guess a rate."""
+    price = req.asking_price or req.price
+    if not price:
+        return ""
+    estimate = property_tax.estimate_property_tax(
+        market_value=price, address=req.address, county=req.tax_county,
+        jurisdiction=req.tax_jurisdiction, school_district=req.tax_school_district,
+        owner_occupied=req.owner_occupied, current_taxable_value=req.seller_taxable_value,
+        millage_lookup=_millage_lookup_factory(db) if db else None,
+    )
+    if not estimate.selected:
+        return ""
+
+    occupancy = "owner-occupied (homestead)" if req.owner_occupied else "non-owner-occupied (non-homestead/investor)"
+    lines = [
+        "",
+        "AUTHORITATIVE PROPERTY TAX (computed — use these figures, do NOT estimate your own):",
+        f"Buyer occupancy: {occupancy}",
+        f"Annual property tax: ${estimate.selected.annual:,.0f} "
+        f"(${estimate.selected.monthly:,.0f}/month, "
+        f"{estimate.selected.effective_rate * 100:.2f}% of purchase price)",
+        f"Basis: {estimate.method.replace('_', ' ')} — {estimate.source}",
+    ]
+    if estimate.homestead and estimate.non_homestead:
+        lines.append(
+            f"Homestead vs non-homestead: ${estimate.homestead.annual:,.0f}/yr vs "
+            f"${estimate.non_homestead.annual:,.0f}/yr"
+        )
+    if estimate.seller_current:
+        lines.append(
+            f"Seller currently pays ${estimate.seller_current.annual:,.0f}/yr; the buyer's "
+            f"bill changes by ${estimate.uncapping_delta_annual:,.0f}/yr on transfer. "
+            "Call this out explicitly in the analysis."
+        )
+    for warning in estimate.warnings:
+        lines.append(f"Tax note: {warning}")
+    return "\n".join(lines)
+
+def property_context(req: AnalysisRequest, db: Optional[Session] = None) -> str:
     lines = [f"Property Address: {req.address}"]
     asking = req.asking_price or req.price
     if asking:            lines.append(f"Asking Price: {asking}")
@@ -90,6 +135,8 @@ def property_context(req: AnalysisRequest) -> str:
     if req.year_built:    lines.append(f"Year Built: {req.year_built}")
     if req.property_type: lines.append(f"Property Type: {req.property_type}")
     if req.hoa:           lines.append(f"HOA: ${req.hoa}/month")
+    tax = tax_context(req, db)
+    if tax:               lines.append(tax)
     return "\n".join(lines)
 
 def send_report_email(recipient: str, subject: str, body: str) -> bool:
@@ -976,6 +1023,114 @@ async def delete_user_analysis(
     db.commit()
     return {"ok": True, "id": analysis_id}
 
+# ── Property tax API ──────────────────────────────────────────────────────────
+
+def _millage_lookup_factory(db: Session):
+    """
+    Resolve the most specific millage record available, widening the search
+    until something matches: school district -> jurisdiction -> county -> state.
+    """
+    def lookup(state, county=None, jurisdiction=None, school_district=None):
+        base = db.query(MillageRate).filter(MillageRate.state == state)
+        attempts = []
+        if county and jurisdiction and school_district:
+            attempts.append(base.filter(
+                func.lower(MillageRate.county) == county.strip().lower(),
+                func.lower(MillageRate.jurisdiction) == jurisdiction.strip().lower(),
+                func.lower(MillageRate.school_district) == school_district.strip().lower()))
+        if county and jurisdiction:
+            attempts.append(base.filter(
+                func.lower(MillageRate.county) == county.strip().lower(),
+                func.lower(MillageRate.jurisdiction) == jurisdiction.strip().lower()))
+        if county:
+            attempts.append(base.filter(func.lower(MillageRate.county) == county.strip().lower()))
+
+        for query in attempts:
+            row = query.order_by(MillageRate.tax_year.desc()).first()
+            if row:
+                return property_tax.MillageRecord(
+                    state=row.state, county=row.county, jurisdiction=row.jurisdiction,
+                    school_district=row.school_district or "",
+                    homestead_mills=row.homestead_mills or 0.0,
+                    non_homestead_mills=row.non_homestead_mills or 0.0,
+                    year=row.tax_year, source=row.source or "",
+                )
+        return None
+    return lookup
+
+
+class TaxEstimateRequest(BaseModel):
+    address: Optional[str] = None
+    state: Optional[str] = None
+    county: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    school_district: Optional[str] = None
+    market_value: Optional[str] = None
+    owner_occupied: bool = False
+    sev: Optional[str] = None
+    current_taxable_value: Optional[str] = None
+
+
+@app.post("/api/tax/estimate")
+async def tax_estimate(req: TaxEstimateRequest, db: Session = Depends(get_db),
+                       current_user: User = Depends(auth.get_current_user)):
+    estimate = property_tax.estimate_property_tax(
+        market_value=req.market_value,
+        state=req.state,
+        address=req.address,
+        county=req.county,
+        jurisdiction=req.jurisdiction,
+        school_district=req.school_district,
+        owner_occupied=req.owner_occupied,
+        sev=property_tax._to_float(req.sev),
+        current_taxable_value=req.current_taxable_value,
+        millage_lookup=_millage_lookup_factory(db),
+    )
+    return estimate.to_dict()
+
+
+@app.get("/api/tax/jurisdictions")
+async def tax_jurisdictions(state: str, county: Optional[str] = None,
+                            jurisdiction: Optional[str] = None,
+                            db: Session = Depends(get_db),
+                            current_user: User = Depends(auth.get_current_user)):
+    """
+    Cascading dropdown feed mirroring Michigan's estimator:
+    state -> county -> city/township/village -> school district.
+    """
+    state = (state or "").strip().upper()
+    if state not in property_tax.VALID_STATES:
+        raise HTTPException(422, "A valid two-letter state code is required")
+
+    query = db.query(MillageRate).filter(MillageRate.state == state)
+    if county:
+        query = query.filter(func.lower(MillageRate.county) == county.strip().lower())
+    if jurisdiction:
+        query = query.filter(func.lower(MillageRate.jurisdiction) == jurisdiction.strip().lower())
+
+    if not county:
+        column, level = MillageRate.county, "county"
+    elif not jurisdiction:
+        column, level = MillageRate.jurisdiction, "jurisdiction"
+    else:
+        column, level = MillageRate.school_district, "school_district"
+
+    values = [row[0] for row in query.with_entities(column).distinct().order_by(column).all() if row[0]]
+    rules = property_tax.get_state_rules(state) or {}
+    return {
+        "state": state,
+        "level": level,
+        "values": values,
+        "has_millage_data": bool(values),
+        "state_rules": {
+            "name": rules.get("name"),
+            "assessment_ratio": rules.get("assessment_ratio"),
+            "owner_occupancy_matters": rules.get("owner_occupancy_matters"),
+            "reassessment_on_sale": rules.get("reassessment_on_sale"),
+        },
+    }
+
+
 # ── Admin API ─────────────────────────────────────────────────────────────────
 
 def credential_register_response(entry: CredentialRegister):
@@ -1344,10 +1499,10 @@ async def super_stats(current_user: User = Depends(auth.require_superadmin), db:
 async def analyze(req: AnalysisRequest, request: Request,
                   current_user: User = Depends(auth.get_current_user),
                   db: Session = Depends(get_db)):
-    if not req.buyer_name.strip():
-        raise HTTPException(422, "Buyer name is required")
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", req.buyer_email.strip()):
-        raise HTTPException(422, "A valid buyer email is required")
+    buyer_name = (req.buyer_name or "").strip() or None
+    buyer_email = (req.buyer_email or "").strip().lower() or None
+    if buyer_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", buyer_email):
+        raise HTTPException(422, "Buyer email must be a valid email address")
     if current_user.role != "superadmin" and (current_user.token_balance or 0) < 1:
         raise HTTPException(402, "No analysis tokens remaining. Contact your sponsoring partner.")
     # Check daily limit
@@ -1376,7 +1531,7 @@ async def analyze(req: AnalysisRequest, request: Request,
         db.commit()
     lead = BuyerLead(
         analysis_id=log.id, tenant_id=current_user.tenant_id, agent_id=current_user.id,
-        buyer_name=req.buyer_name.strip(), buyer_email=req.buyer_email.strip().lower(),
+        buyer_name=buyer_name, buyer_email=buyer_email,
     )
     db.add(lead); db.commit(); db.refresh(lead)
 
@@ -1394,7 +1549,7 @@ async def analyze(req: AnalysisRequest, request: Request,
     elif req.analysis_type == "screen":
         user_msg = f"Screen for investment properties matching: {req.address}"
     else:
-        user_msg = property_context(req)
+        user_msg = property_context(req, db)
 
     use_web_search = req.analysis_type in WEB_SEARCH_TYPES
     extra = {"tools": WEB_SEARCH_TOOL} if use_web_search else {}
@@ -1429,18 +1584,20 @@ async def analyze(req: AnalysisRequest, request: Request,
             partner = tenant.company_name if tenant else "your mortgage partner"
             partner_contact = " · ".join(filter(None, [tenant.contact_phone if tenant else None,
                                                           tenant.contact_email if tenant else None]))
+            buyer_line = f"Buyer: {buyer_name or 'not provided'}{' <' + buyer_email + '>' if buyer_email else ''}\n"
             email_body = (f"{tenant.tagline if tenant and tenant.tagline else 'AI-powered property intelligence'}\n\n"
                           f"This Property Analysis is brought to you by {partner}"
                           f"{('\\n' + partner_contact) if partner_contact else ''}\n\n"
                           f"Agent: {current_user.full_name or 'Unknown'} <{current_user.email}>\n"
-                          f"Buyer: {req.buyer_name.strip()} <{req.buyer_email.strip()}>\n"
+                          f"{buyer_line}"
                           f"Property: {req.address}\n"
                           f"Analysis type: {req.analysis_type}\n\n{report_text}")
             buyer_sent = admin_sent = False
-            try:
-                buyer_sent = send_report_email(req.buyer_email.strip(), f"Property analysis for {req.address}", email_body)
-            except Exception as email_error:
-                print(f"Buyer report email failed for lead {lead.id}: {email_error}")
+            if buyer_email:
+                try:
+                    buyer_sent = send_report_email(buyer_email, f"Property analysis for {req.address}", email_body)
+                except Exception as email_error:
+                    print(f"Buyer report email failed for lead {lead.id}: {email_error}")
 
             admin_recipients = {email for email in [sponsor, os.getenv("REPORT_NOTIFICATION_EMAIL")] if email}
             if tenant:
@@ -1449,9 +1606,10 @@ async def analyze(req: AnalysisRequest, request: Request,
                         tenant_id=tenant.id, role="admin", is_active=True
                     ).all()
                 )
+            admin_subject = f"New buyer lead: {buyer_name}" if buyer_name else f"New analysis: {req.address}"
             for recipient in admin_recipients:
                 try:
-                    admin_sent = send_report_email(recipient, f"New buyer lead: {req.buyer_name.strip()}", email_body) or admin_sent
+                    admin_sent = send_report_email(recipient, admin_subject, email_body) or admin_sent
                 except Exception as email_error:
                     print(f"Admin report email failed for lead {lead.id} to {recipient}: {email_error}")
             sponsor_sent = admin_sent

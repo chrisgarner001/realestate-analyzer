@@ -255,22 +255,6 @@
   <!-- Input Card -->
   <div class="card rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4">
 
-    <!-- Buyer contact -->
-    <div class="border-b pb-3 sm:pb-4" style="border-color:var(--border)">
-      <p class="text-xs font-semibold mb-2" style="color:var(--gold-light)">BUYER INFORMATION</p>
-      <div class="flex flex-col sm:flex-row gap-3">
-        <div class="flex-1">
-          <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Buyer Name <span class="text-red-400">*</span></label>
-          <input x-model="buyerName" type="text" autocomplete="name" class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="Jane Smith">
-        </div>
-        <div class="flex-1">
-          <label class="block text-xs font-medium mb-1.5" style="color:var(--muted)">Buyer Email <span class="text-red-400">*</span></label>
-          <input x-model="buyerEmail" type="email" autocomplete="email" class="w-full rounded-lg px-3 sm:px-4 py-3 text-sm" placeholder="jane@example.com">
-        </div>
-      </div>
-      <p class="text-xs mt-2" style="color:var(--muted)">The completed report will be sent to the buyer and your sponsoring partner.</p>
-    </div>
-
     <!-- Address + Asking Price -->
     <div class="flex flex-col sm:flex-row gap-3">
       <div class="flex-1">
@@ -325,20 +309,6 @@
       <p class="text-xs leading-relaxed sm:pt-5" style="color:var(--muted)">
         Your estimate to get the property rent-ready or sell-ready — factored into cost basis for all exit strategies.
       </p>
-    </div>
-
-    <!-- Analysis Type Pills — horizontally scrollable on mobile -->
-    <div>
-      <label class="block text-xs font-medium mb-2" style="color:var(--muted)">Analysis Type</label>
-      <div class="pills-scroll">
-        <div class="flex gap-2" style="width:max-content">
-          <template x-for="mode in modes" :key="mode.id">
-            <button @click="analysisType=mode.id"
-              :class="['pill text-xs font-medium px-3 py-1.5 rounded-full', analysisType===mode.id?'active':'']"
-              x-text="mode.label"></button>
-          </template>
-        </div>
-      </div>
     </div>
 
     <!-- Mode description -->
@@ -425,6 +395,7 @@
 
     <!-- Suggested Offer Banner -->
     <div x-show="scoreData&&scoreData.key_metrics&&scoreData.key_metrics.suggested_offer"
+      data-pdf-key="offer"
       class="rounded-xl p-4 sm:p-5"
       style="background:linear-gradient(135deg,#1a2e1f 0%,#1a2332 100%);border:1px solid #2d8a4e">
       <div class="flex items-center gap-2 mb-3">
@@ -434,6 +405,9 @@
           </svg>
         </div>
         <span class="text-xs font-semibold uppercase tracking-wide" style="color:#4ade80">Suggested Offer</span>
+        <label class="pdf-toggle ml-auto flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+          <input type="checkbox" x-model="pdfInclude.offer" class="rounded"> Include in final report
+        </label>
       </div>
       <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-4 sm:gap-6">
         <div x-show="scoreData?.key_metrics?.asking_price&&scoreData.key_metrics.asking_price!=='null'">
@@ -458,10 +432,15 @@
       </div>
     </div>
 
-    <div x-show="getLiveRentalSummary()" class="card rounded-xl p-4 sm:p-5">
+    <div x-show="getLiveRentalSummary()" data-pdf-key="underwriting" class="card rounded-xl p-4 sm:p-5">
       <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
         <div><p class="text-xs font-medium" style="color:var(--muted)">UPDATED UNDERWRITING</p><p class="mt-1 text-sm font-semibold" style="color:var(--text)">Current financial assumptions for this client-ready report.</p></div>
-        <p class="text-xs" style="color:var(--gold-light)">Updates automatically as assumptions change</p>
+        <div class="flex items-center gap-3">
+          <p class="text-xs" style="color:var(--gold-light)">Updates automatically as assumptions change</p>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.underwriting" class="rounded"> Include in final report
+          </label>
+        </div>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px overflow-hidden rounded-lg" style="background:var(--border);border:1px solid var(--border)">
         <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Purchase Price</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getPropertyPrice())"></p></div>
@@ -477,10 +456,15 @@
       </div>
     </div>
 
-    <div x-show="scoreData!==null" class="card rounded-xl p-4 sm:p-5 space-y-5">
+    <div x-show="scoreData!==null" data-pdf-key="comparables" class="card rounded-xl p-4 sm:p-5 space-y-5">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div><p class="text-xs font-medium" style="color:var(--muted)">COMPARABLE REVIEW</p><p class="mt-1 text-xs" style="color:var(--muted)">Sources, recency, and selection rationale are provided for review before relying on the analysis.</p></div>
-        <div x-show="getComparableSales().length" class="text-right"><p class="text-xs" style="color:var(--muted)">Selected sale comp average</p><p class="text-lg font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSelectedSaleCompAverage())"></p></div>
+        <div class="flex items-center gap-3">
+          <div x-show="getComparableSales().length" class="text-right"><p class="text-xs" style="color:var(--muted)">Selected sale comp average</p><p class="text-lg font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSelectedSaleCompAverage())"></p></div>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.comparables" class="rounded"> Include in final report
+          </label>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <div class="flex items-center justify-between mb-2">
@@ -547,7 +531,11 @@
 
 
     <!-- Score Dashboard -->
-    <div x-show="scoreData!==null" class="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
+    <div x-show="scoreData!==null" data-pdf-key="scoreDashboard">
+      <label class="pdf-toggle flex items-center justify-end gap-1.5 text-xs mb-2 cursor-pointer select-none" style="color:var(--muted)">
+        <input type="checkbox" x-model="pdfInclude.scoreDashboard" class="rounded"> Include in final report
+      </label>
+      <div class="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
 
       <!-- Score Gauge — horizontal layout on mobile -->
       <div class="card rounded-xl p-4 sm:p-5 flex items-center sm:flex-col sm:items-center gap-4 sm:gap-0">
@@ -610,9 +598,13 @@
         </div>
       </div>
     </div>
+    </div>
 
     <!-- Finance Section -->
-    <div x-show="getPropertyPrice() > 0" class="card rounded-xl p-4 sm:p-5">
+    <div x-show="getPropertyPrice() > 0" data-pdf-key="finance" class="card rounded-xl p-4 sm:p-5">
+      <label class="pdf-toggle flex items-center justify-end gap-1.5 text-xs mb-2 cursor-pointer select-none" style="color:var(--muted)">
+        <input type="checkbox" x-model="pdfInclude.finance" class="rounded"> Include in final report
+      </label>
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div class="flex items-center gap-2">
           <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--navy-mid)">
@@ -649,7 +641,7 @@
           </label>
           <label class="flex items-center gap-2" style="color:var(--muted)">
             Property tax
-            <input x-model="propertyTaxRate" type="number" step="0.01" min="0" max="10" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+            <input x-model="propertyTaxRate" @input="taxRateEdited = true" type="number" step="0.01" min="0" max="10" class="w-16 rounded-lg px-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
             <span>% / yr</span>
           </label>
           <label class="flex items-center gap-2" style="color:var(--muted)">
@@ -665,6 +657,124 @@
             Monthly override
             <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span><input x-model="insuranceMonthlyOverride" type="number" min="0" step="5" class="w-20 rounded-lg pl-5 pr-2 py-1.5 text-center font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)" placeholder="Auto"></span>
           </label>
+        </div>
+      </div>
+
+      <!-- Actual property tax: millage-based homestead vs non-homestead -->
+      <div class="mt-4 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
+        <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style="background:var(--navy-mid)">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold" style="color:var(--gold-light)">ACTUAL PROPERTY TAX</span>
+            <span x-show="taxEstimate" class="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                  :style="taxEstimate?.method === 'millage'
+                    ? 'background:rgba(45,138,78,.18);color:var(--green-light)'
+                    : 'background:rgba(249,115,22,.15);color:#f97316'"
+                  x-text="taxEstimate?.method === 'millage' ? 'Local millage rates' : 'Statewide estimate'"></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 text-xs cursor-pointer" style="color:var(--muted)">
+              <input type="checkbox" x-model="taxOwnerOccupied" @change="refreshTaxEstimate()">
+              Buyer will owner-occupy
+            </label>
+            <button type="button" @click="taxPanelOpen = !taxPanelOpen" class="text-xs font-semibold" style="color:var(--gold-light)"
+                    x-text="taxPanelOpen ? 'Hide jurisdiction' : 'Set jurisdiction'"></button>
+          </div>
+        </div>
+
+        <!-- Cascading jurisdiction picker, mirroring the state estimator UX -->
+        <div x-show="taxPanelOpen" x-cloak class="px-4 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs" style="background:var(--navy-deep)">
+          <label class="flex flex-col gap-1" style="color:var(--muted)">
+            State
+            <select x-model="taxState" @change="onTaxStateChange()" class="rounded-lg px-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+              <option value="">Auto-detect</option>
+              <template x-for="code in taxStateCodes" :key="code">
+                <option :value="code" x-text="code"></option>
+              </template>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1" style="color:var(--muted)">
+            County
+            <select x-model="taxCounty" @change="onTaxCountyChange()" :disabled="!taxCountyOptions.length" class="rounded-lg px-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+              <option value="" x-text="taxCountyOptions.length ? 'Select county' : 'No local data'"></option>
+              <template x-for="name in taxCountyOptions" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1" style="color:var(--muted)">
+            City / Township / Village
+            <select x-model="taxJurisdiction" @change="onTaxJurisdictionChange()" :disabled="!taxJurisdictionOptions.length" class="rounded-lg px-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+              <option value="">Select local unit</option>
+              <template x-for="name in taxJurisdictionOptions" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1" style="color:var(--muted)">
+            School District
+            <select x-model="taxSchoolDistrict" @change="refreshTaxEstimate()" :disabled="!taxSchoolOptions.length" class="rounded-lg px-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)">
+              <option value="">Select district</option>
+              <template x-for="name in taxSchoolOptions" :key="name">
+                <option :value="name" x-text="name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1 sm:col-span-2" style="color:var(--muted)">
+            Seller's current Taxable Value (optional — shows the uncapping jump)
+            <span class="relative"><span class="absolute left-2 top-1/2 -translate-y-1/2">$</span>
+              <input x-model.debounce.600ms="sellerTaxableValue" @input="refreshTaxEstimate()" type="number" min="0" step="1000" placeholder="From the listing or assessor record"
+                     class="w-full rounded-lg pl-5 pr-2 py-1.5 font-semibold" style="background:var(--navy-mid);border:1px solid var(--border);color:var(--text)"></span>
+          </label>
+        </div>
+
+        <!-- Homestead vs non-homestead side by side -->
+        <div x-show="taxEstimate?.homestead" x-cloak class="grid grid-cols-1 sm:grid-cols-2 gap-px" style="background:var(--border)">
+          <div class="p-4" style="background:var(--navy-mid)">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs" style="color:var(--muted)">Homestead / owner-occupied</span>
+              <span x-show="taxOwnerOccupied" class="text-[10px] font-bold px-2 py-0.5 rounded-full" style="background:rgba(45,138,78,.2);color:var(--green-light)">APPLIED</span>
+            </div>
+            <div class="text-xl font-bold" style="color:var(--text)" x-text="formatCurrency(taxEstimate?.homestead?.monthly) + '/mo'"></div>
+            <div class="text-xs mt-1" style="color:var(--muted)">
+              <span x-text="formatCurrency(taxEstimate?.homestead?.annual) + '/yr'"></span>
+              <span x-show="taxEstimate?.homestead?.mills" x-text="' · ' + taxEstimate?.homestead?.mills + ' mills'"></span>
+            </div>
+          </div>
+          <div class="p-4" style="background:var(--navy-mid)">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs" style="color:var(--muted)">Non-homestead / investor</span>
+              <span x-show="!taxOwnerOccupied" class="text-[10px] font-bold px-2 py-0.5 rounded-full" style="background:rgba(45,138,78,.2);color:var(--green-light)">APPLIED</span>
+            </div>
+            <div class="text-xl font-bold" style="color:#f97316" x-text="formatCurrency(taxEstimate?.non_homestead?.monthly) + '/mo'"></div>
+            <div class="text-xs mt-1" style="color:var(--muted)">
+              <span x-text="formatCurrency(taxEstimate?.non_homestead?.annual) + '/yr'"></span>
+              <span x-show="taxEstimate?.non_homestead?.mills" x-text="' · ' + taxEstimate?.non_homestead?.mills + ' mills'"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- "Seller pays X, you will pay Y" -->
+        <div x-show="taxEstimate?.seller_current" x-cloak class="px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2" style="background:var(--navy-deep);border-top:1px solid var(--border)">
+          <div>
+            <div class="text-[10px] uppercase tracking-wide" style="color:var(--muted)">Seller pays today</div>
+            <div class="text-sm font-bold" style="color:var(--text)" x-text="formatCurrency(taxEstimate?.seller_current?.annual) + '/yr'"></div>
+          </div>
+          <div class="text-lg" style="color:var(--muted)">→</div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wide" style="color:var(--muted)">You will pay</div>
+            <div class="text-sm font-bold" style="color:#f97316" x-text="formatCurrency(taxEstimate?.selected?.annual) + '/yr'"></div>
+          </div>
+          <div x-show="taxEstimate?.uncapping_delta_annual > 0" class="px-3 py-1 rounded-lg" style="background:rgba(249,115,22,.15)">
+            <span class="text-xs font-bold" style="color:#f97316"
+                  x-text="'+' + formatCurrency(taxEstimate?.uncapping_delta_annual) + '/yr increase on transfer'"></span>
+          </div>
+        </div>
+
+        <div x-show="taxEstimate?.warnings?.length" x-cloak class="px-4 py-3 space-y-1" style="background:var(--navy-deep);border-top:1px solid var(--border)">
+          <template x-for="warning in (taxEstimate?.warnings || [])" :key="warning">
+            <p class="text-xs flex gap-2" style="color:var(--muted)"><span style="color:#f97316">▲</span><span x-text="warning"></span></p>
+          </template>
+          <p x-show="taxEstimate?.source" class="text-[10px] pt-1" style="color:var(--muted)" x-text="'Source: ' + taxEstimate?.source"></p>
         </div>
       </div>
 
@@ -725,7 +835,10 @@
       </div>
 
       <p class="text-xs mt-3" style="color:var(--muted)">
-        Tax at <span x-text="propertyTaxMonthlyOverride ? formatCurrency(getMonthlyPropertyTax())+'/mo override' : propertyTaxRate+'% annually'"></span> · Insurance at <span x-text="insuranceMonthlyOverride ? formatCurrency(getMonthlyInsurance())+'/mo override' : insuranceRate+'% annually'"></span> · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
+        Tax at <span x-text="propertyTaxMonthlyOverride ? formatCurrency(getMonthlyPropertyTax())+'/mo override'
+          : (taxEstimate?.selected && !taxRateEdited
+              ? formatCurrency(getMonthlyPropertyTax())+'/mo ' + (taxEstimate.method === 'millage' ? 'from local millage' : 'from state rates')
+              : propertyTaxRate+'% annually')"></span> · Insurance at <span x-text="insuranceMonthlyOverride ? formatCurrency(getMonthlyInsurance())+'/mo override' : insuranceRate+'% annually'"></span> · PMI at 0.85% below 20% equity · Closing costs ~3% · Rehab added to total cash needed
       </p>
 
       <div class="mt-5 rounded-xl overflow-hidden" style="border:1px solid var(--border)">
@@ -822,7 +935,7 @@
 
     <!-- Investment Analysis -->
     <div x-ref="investmentCardAnchor"></div>
-    <div x-show="getPropertyPrice() > 0" x-ref="investmentCard" class="card rounded-xl p-4 sm:p-5">
+    <div x-show="getPropertyPrice() > 0" x-ref="investmentCard" data-pdf-key="investment" class="card rounded-xl p-4 sm:p-5">
       <div class="flex items-center gap-2 mb-4">
         <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:var(--navy-mid)">
           <svg class="w-4 h-4" style="color:var(--gold-light)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -830,6 +943,9 @@
           </svg>
         </div>
         <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--gold-light)">Investment Analysis</p>
+        <label class="pdf-toggle ml-auto flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+          <input type="checkbox" x-model="pdfInclude.investment" class="rounded"> Include in final report
+        </label>
       </div>
 
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs" style="color:var(--muted)">
@@ -970,8 +1086,13 @@
       <p class="text-xs leading-relaxed" style="color:#f0c45b">Finance and rental calculations update automatically as you change assumptions. Findings, comp tables, risk matrix, and recommendation remain from the original report.</p>
     </div>
     <div x-show="scoreData&&(scoreData.red_flags?.length||scoreData.key_findings?.length)" class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-      <div x-show="scoreData&&scoreData.key_findings?.length" class="card rounded-xl p-4 sm:p-5">
-        <p class="text-xs font-medium mb-3" style="color:var(--muted)">KEY FINDINGS</p>
+      <div x-show="scoreData&&scoreData.key_findings?.length" data-pdf-key="keyFindings" class="card rounded-xl p-4 sm:p-5">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <p class="text-xs font-medium" style="color:var(--muted)">KEY FINDINGS</p>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.keyFindings" class="rounded"> Include in final report
+          </label>
+        </div>
         <ul class="space-y-2">
           <template x-for="f in (scoreData?scoreData.key_findings:[])" :key="f">
             <li class="flex gap-2 text-sm">
@@ -983,8 +1104,13 @@
           </template>
         </ul>
       </div>
-      <div x-show="scoreData&&scoreData.red_flags?.length" class="card rounded-xl p-4 sm:p-5">
-        <p class="text-xs font-medium mb-3" style="color:#ef4444">RED FLAGS</p>
+      <div x-show="scoreData&&scoreData.red_flags?.length" data-pdf-key="redFlags" class="card rounded-xl p-4 sm:p-5">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <p class="text-xs font-medium" style="color:#ef4444">RED FLAGS</p>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.redFlags" class="rounded"> Include in final report
+          </label>
+        </div>
         <ul class="space-y-2">
           <template x-for="f in (scoreData?scoreData.red_flags:[])" :key="f">
             <li class="flex gap-2 text-sm">
@@ -1001,7 +1127,7 @@
     </div>
 
     <!-- Analysis status and completed report -->
-    <div class="card rounded-xl p-4 sm:p-5">
+    <div data-pdf-key="analysis" class="card rounded-xl p-4 sm:p-5">
       <div class="flex items-center gap-2 mb-3">
         <p class="text-xs font-medium" style="color:var(--muted)">DETAILED ANALYSIS</p>
         <span x-show="hasResults&&!analyzing" class="text-xs" style="color:var(--gold-light)">Original report</span>
@@ -1009,6 +1135,9 @@
           <span class="pulse-dot w-1.5 h-1.5 rounded-full inline-block" style="background:var(--green)"></span>
           Working...
         </span>
+        <label class="pdf-toggle ml-auto flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+          <input type="checkbox" x-model="pdfInclude.analysis" class="rounded"> Include in final report
+        </label>
       </div>
       <div x-show="analyzing" class="py-8 sm:py-12 text-center">
         <div class="status-icon w-16 h-16 mx-auto rounded-2xl flex items-center justify-center" style="background:rgba(45,138,78,.16);color:var(--green)">
@@ -1027,13 +1156,18 @@
       <div x-show="!analyzing&&displayText.length>0" class="stream-content text-sm leading-relaxed" x-html="renderMarkdown(displayText)"></div>
     </div>
 
-    <section x-show="hasResults&&!analyzing" class="card rounded-xl p-4 sm:p-5">
+    <section x-show="hasResults&&!analyzing" data-pdf-key="nextSteps" class="card rounded-xl p-4 sm:p-5">
       <div class="flex flex-wrap items-end justify-between gap-3 mb-4">
         <div>
           <p class="text-xs font-medium" style="color:var(--muted)">NEXT STEPS</p>
           <p class="mt-1 text-sm font-semibold" style="color:var(--text)">Build the right team before you move forward.</p>
         </div>
-        <p class="text-xs" style="color:var(--muted)" x-text="tenant&&tenant.company_name?'Coordinate referrals through '+tenant.company_name:'Coordinate these services with your real estate team.'"></p>
+        <div class="flex items-center gap-3">
+          <p class="text-xs" style="color:var(--muted)" x-text="tenant&&tenant.company_name?'Coordinate referrals through '+tenant.company_name:'Coordinate these services with your real estate team.'"></p>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.nextSteps" class="rounded"> Include in final report
+          </label>
+        </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-lg" style="background:var(--border);border:1px solid var(--border)">
         <div class="p-3" style="background:var(--navy-mid)"><p class="text-sm font-semibold">Home Inspection</p><p class="mt-1 text-xs" style="color:var(--muted)">Confirm condition, safety, and repair priorities.</p></div>
@@ -1071,7 +1205,7 @@
       </svg>
     </div>
     <p class="font-medium" style="color:var(--muted)">Enter an address to begin</p>
-    <p class="text-sm max-w-xs mx-auto" style="color:#4b5563">Choose an analysis type, enter an address, and tap Analyze.</p>
+    <p class="text-sm max-w-xs mx-auto" style="color:#4b5563">Enter an address and tap Analyze.</p>
   </div>
 
   <!-- Spacer so content clears sticky bar on mobile -->
@@ -1143,7 +1277,10 @@ function app() {
     usageCount: 0, usageLimit: 5,
     reports: [], historyOpen: false, loadingHistory: false,
     // ── Analysis state ──────────────────────────────────────────────
-    buyerName:'', buyerEmail:'', deliveryMsg:'',
+    deliveryMsg:'',
+    pdfInclude: { offer:true, underwriting:true, comparables:true, scoreDashboard:true,
+                  finance:true, investment:true, keyFindings:true, redFlags:true,
+                  analysis:true, nextSteps:true },
     address:'', streetAddress:'', city:'', state:'', zip:'', address2:'', analysisType:'full', askingPrice:'', rehabCost:'',
     price:'', beds:'', baths:'', sqft:'', yearBuilt:'', propertyType:'', hoa:'',
     showAdvanced: false,
@@ -1152,6 +1289,10 @@ function app() {
     helpOpen: false, helpInput: '', helpLoading: false, helpMessages: [],
     helpPrompts: ['How do I run an analysis?', 'What does DSCR mean?', 'How do my tokens work?'],
     interestRate: 7.25, downPaymentPercent: 20, propertyTaxRate: 1.2, propertyTaxMonthlyOverride: '', insuranceRate: 0.5, insuranceMonthlyOverride: '',
+    taxPanelOpen: false, taxEstimate: null, taxLoading: false, taxOwnerOccupied: false, taxRateEdited: false,
+    taxState: '', taxCounty: '', taxJurisdiction: '', taxSchoolDistrict: '', sellerTaxableValue: '',
+    taxCountyOptions: [], taxJurisdictionOptions: [], taxSchoolOptions: [],
+    taxStateCodes: ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'],
     rentOverride: '', suggestedOfferOverride: '', arvOverride: '', landContractSalePrice: '', landContractDownPayment: 10,
     landContractRate: 8.0, landContractTermYears: 30,
     saleCompSelections: {}, rentalCompSelections: {}, customSaleComps: [], customRentalComps: [],
@@ -1367,7 +1508,6 @@ function app() {
 
     canAnalyze() {
       if (!this.getComposedAddress()) return false;
-      if (!this.buyerName.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(this.buyerEmail.trim())) return false;
       if (this.analysisType==='compare'&&!this.address2.trim()) return false;
       return true;
     },
@@ -1382,6 +1522,8 @@ function app() {
       const source = document.getElementById('pdf-content');
       if (!source) { this.exporting = false; return; }
       const addr = this.address.replace(/[^a-z0-9]/gi,'-').toLowerCase().slice(0,40);
+      const excludedKeys = Object.keys(this.pdfInclude).filter(k => !this.pdfInclude[k]);
+      const excludedCss = excludedKeys.map(k => `#pdf-content [data-pdf-key="${k}"]{display:none!important}`).join('\n        ');
       const style = document.createElement('style');
       style.id = 'pdf-light-override';
       style.textContent = `
@@ -1399,6 +1541,8 @@ function app() {
         #pdf-content .stream-content strong{color:#111827!important;opacity:1!important}
         #pdf-content .disclaimer{background:#fff!important;border-color:#e2e8f0!important;color:#111827!important}
         #pdf-content .score-ring-bg{stroke:#e2e8f0!important}
+        #pdf-content .pdf-toggle{display:none!important}
+        ${excludedCss}
       `;
       document.head.appendChild(style);
       try {
@@ -1798,6 +1942,9 @@ function app() {
     },
 
     getPropertyTaxRate() {
+      // A resolved millage/state estimate beats Claude's guess and the 1.2% default.
+      const estimated = this.taxEstimate?.selected?.effective_rate;
+      if (estimated > 0 && !this.taxRateEdited) return estimated;
       const reportRate = this.scoreData?.key_metrics?.property_tax_rate || this.scoreData?.key_metrics?.tax_rate;
       if (this.propertyTaxRate === 1.2 && reportRate) {
         const text = String(reportRate);
@@ -1810,7 +1957,79 @@ function app() {
 
     getMonthlyPropertyTax() {
       const override = parseFloat(this.propertyTaxMonthlyOverride);
-      return !isNaN(override) && override >= 0 ? override : (this.getPropertyPrice() * this.getPropertyTaxRate()) / 12;
+      if (!isNaN(override) && override >= 0) return override;
+      const estimated = this.taxEstimate?.selected?.monthly;
+      if (estimated > 0 && !this.taxRateEdited) return estimated;
+      return (this.getPropertyPrice() * this.getPropertyTaxRate()) / 12;
+    },
+
+    async refreshTaxEstimate() {
+      const price = this.getPropertyPrice();
+      if (!price || !this.token) return;
+      this.taxLoading = true;
+      try {
+        const r = await fetch('/api/tax/estimate', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address: this.address,
+            state: this.taxState || null,
+            county: this.taxCounty || null,
+            jurisdiction: this.taxJurisdiction || null,
+            school_district: this.taxSchoolDistrict || null,
+            market_value: String(price),
+            owner_occupied: this.taxOwnerOccupied,
+            current_taxable_value: this.sellerTaxableValue || null,
+          }),
+        });
+        if (!r.ok) return;
+        this.taxEstimate = await r.json();
+        if (!this.taxState && this.taxEstimate.state) {
+          this.taxState = this.taxEstimate.state;
+          this.loadTaxJurisdictions();
+        }
+      } catch (e) {
+        // Tax lookup is advisory; the percentage-based fallback still renders.
+      } finally {
+        this.taxLoading = false;
+      }
+    },
+
+    async loadTaxJurisdictions() {
+      if (!this.taxState || !this.token) return;
+      const params = new URLSearchParams({ state: this.taxState });
+      if (this.taxCounty) params.set('county', this.taxCounty);
+      if (this.taxJurisdiction) params.set('jurisdiction', this.taxJurisdiction);
+      try {
+        const r = await fetch(`/api/tax/jurisdictions?${params}`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.level === 'county') this.taxCountyOptions = data.values;
+        else if (data.level === 'jurisdiction') this.taxJurisdictionOptions = data.values;
+        else this.taxSchoolOptions = data.values;
+      } catch (e) { /* dropdowns simply stay empty */ }
+    },
+
+    onTaxStateChange() {
+      this.taxCounty = this.taxJurisdiction = this.taxSchoolDistrict = '';
+      this.taxJurisdictionOptions = this.taxSchoolOptions = [];
+      this.loadTaxJurisdictions();
+      this.refreshTaxEstimate();
+    },
+
+    onTaxCountyChange() {
+      this.taxJurisdiction = this.taxSchoolDistrict = '';
+      this.taxSchoolOptions = [];
+      this.loadTaxJurisdictions();
+      this.refreshTaxEstimate();
+    },
+
+    onTaxJurisdictionChange() {
+      this.taxSchoolDistrict = '';
+      this.loadTaxJurisdictions();
+      this.refreshTaxEstimate();
     },
 
     getMonthlyInsurance() {
@@ -2012,7 +2231,6 @@ function app() {
         setTimeout(()=>{ document.getElementById('pdf-content')?.scrollIntoView({behavior:'smooth',block:'start'}); }, 100);
       }
       const body = {
-        buyer_name:this.buyerName.trim(), buyer_email:this.buyerEmail.trim(),
         address:this.address.trim(), analysis_type:this.analysisType,
         address2:this.address2.trim()||null, asking_price:this.askingPrice.trim()||null,
         rehab_cost:this.rehabCost.trim()||null,
@@ -2020,6 +2238,10 @@ function app() {
         baths:this.baths?parseFloat(this.baths):null, sqft:this.sqft.trim()||null,
         year_built:this.yearBuilt?parseInt(this.yearBuilt):null,
         property_type:this.propertyType||null, hoa:this.hoa.trim()||null,
+        owner_occupied:this.taxOwnerOccupied,
+        tax_county:this.taxCounty||null, tax_jurisdiction:this.taxJurisdiction||null,
+        tax_school_district:this.taxSchoolDistrict||null,
+        seller_taxable_value:this.sellerTaxableValue||null,
       };
       try {
         const headers = {'Content-Type':'application/json'};
@@ -2061,6 +2283,7 @@ function app() {
         clearInterval(this.statusTimer);
         this.statusTimer=null;
         setTimeout(()=>this.placeInvestmentCardInReport(), 50);
+        this.refreshTaxEstimate();
         await this.fetchUsage(); // refresh usage counter
       }
     }

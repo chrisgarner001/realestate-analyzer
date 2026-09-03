@@ -3,7 +3,7 @@ Database models and session factory for PropYield.
 Uses PostgreSQL in production (DATABASE_URL env var) or SQLite locally.
 """
 from sqlalchemy import (create_engine, Column, Integer, String, Text, Boolean,
-                         DateTime, ForeignKey)
+                         DateTime, Float, ForeignKey, Index, UniqueConstraint)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
 from datetime import datetime
@@ -123,8 +123,8 @@ class BuyerLead(Base):
     analysis_id        = Column(Integer, nullable=False, index=True)
     tenant_id          = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     agent_id           = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    buyer_name         = Column(String(200), nullable=False)
-    buyer_email        = Column(String(200), nullable=False, index=True)
+    buyer_name         = Column(String(200), nullable=True)
+    buyer_email        = Column(String(200), nullable=True, index=True)
     report_text        = Column(String, nullable=True)
     buyer_email_sent   = Column(Boolean, default=False)
     sponsor_email_sent = Column(Boolean, default=False)
@@ -147,6 +147,31 @@ class CredentialRegister(Base):
     notes          = Column(Text)
     created_at     = Column(DateTime, default=datetime.utcnow)
     updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MillageRate(Base):
+    """
+    Levied millage for one taxing jurisdiction, modelled on Michigan's Property
+    Tax Estimator: county + city/township/village + school district resolve to a
+    homestead (PRE) and a non-homestead rate.
+    """
+    __tablename__ = "millage_rates"
+    id                  = Column(Integer, primary_key=True, index=True)
+    state               = Column(String(2),   nullable=False, index=True)
+    county              = Column(String(120), nullable=False, index=True)
+    jurisdiction        = Column(String(200), nullable=False, index=True)
+    school_district     = Column(String(200), default="", index=True)
+    homestead_mills     = Column(Float, default=0.0)
+    non_homestead_mills = Column(Float, default=0.0)
+    tax_year            = Column(Integer, index=True)
+    source              = Column(String(300))
+    updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("state", "county", "jurisdiction", "school_district",
+                         "tax_year", name="uq_millage_jurisdiction"),
+        Index("ix_millage_lookup", "state", "county", "jurisdiction"),
+    )
 
 
 class PasswordResetToken(Base):
@@ -206,6 +231,14 @@ def init_db():
     if "invite_template" not in tenant_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE tenants ADD COLUMN invite_template TEXT"))
+
+    # buyer_name/buyer_email became optional; create_all never loosens an
+    # existing NOT NULL, so relax it explicitly. SQLite can't ALTER COLUMN at
+    # all — local dev DBs pick up the new nullable=True only on a fresh file.
+    if DATABASE_URL:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE buyer_leads ALTER COLUMN buyer_name DROP NOT NULL"))
+            connection.execute(text("ALTER TABLE buyer_leads ALTER COLUMN buyer_email DROP NOT NULL"))
 
     email    = os.getenv("SUPER_ADMIN_EMAIL",    "admin@yourapp.com")
     password = os.getenv("SUPER_ADMIN_PASSWORD", "changeme123")
