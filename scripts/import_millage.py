@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -97,42 +98,111 @@ def _mills(row, index, key, as_percent):
     return value * 10.0 if as_percent else value
 
 
-def import_csv(path, state, tax_year, fmt, source, as_percent, dry_run):
+def _normalize_rows(reader_rows, index, as_percent):
+    """Turn DictReader rows into the normalized shape shared by every import path."""
+    normalized = []
+    for row in reader_rows:
+        normalized.append({
+            "county": (row.get(index["county"]) or "").strip(),
+            "jurisdiction": (row.get(index["jurisdiction"]) or "").strip(),
+            "school_district": (row.get(index.get("school_district", "")) or "").strip(),
+            "homestead_mills": _mills(row, index, "homestead_mills", as_percent),
+            "non_homestead_mills": _mills(row, index, "non_homestead_mills", as_percent),
+        })
+    return normalized
+
+
+# Michigan Treasury's "TOTAL RATES Report" export is not a flat CSV: it has a
+# multi-line wrapped header, a "COUNTY:   <name>" section row per county, a
+# bare jurisdiction-name row per city/township/village, then one data row per
+# school district within that jurisdiction (county/jurisdiction are implied by
+# the preceding section rows, not repeated per row). The header also reprints
+# at every page break. Column positions (0-indexed) are fixed by the export:
+#   7  = school district name (data rows only)
+#   10 = Total Millage for Principal Residence/Ag Exemption (homestead)
+#   12 = Total Millage NonHomestead
+MI_RAW_SCHOOL_COL = 7
+MI_RAW_HOMESTEAD_COL = 10
+MI_RAW_NON_HOMESTEAD_COL = 12
+
+
+def parse_mi_treasury_raw(path):
+    """Walk the raw MI Treasury export and yield normalized county/jurisdiction/school rows."""
+    with open(path, newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.reader(handle))
+
+    normalized = []
+    county = jurisdiction = None
+    for row in rows:
+        col0 = (row[0] if len(row) > 0 else "").strip()
+        col_school = (row[MI_RAW_SCHOOL_COL] if len(row) > MI_RAW_SCHOOL_COL else "").strip()
+
+        if col_school.lower() == "school district":
+            continue  # repeated header row at a page break
+
+        if col0.upper().startswith("COUNTY:"):
+            county = col0.split(":", 1)[1].strip()
+            jurisdiction = None
+            continue
+
+        if col0 and not col_school:
+            jurisdiction = col0
+            continue
+
+        if col_school and county and jurisdiction:
+            def _mill(col):
+                raw = (row[col] if len(row) > col else "").strip()
+                try:
+                    return float(raw)
+                except ValueError:
+                    return 0.0
+
+            normalized.append({
+                "county": county,
+                "jurisdiction": jurisdiction,
+                "school_district": col_school,
+                "homestead_mills": _mill(MI_RAW_HOMESTEAD_COL),
+                "non_homestead_mills": _mill(MI_RAW_NON_HOMESTEAD_COL),
+            })
+    return normalized
+
+
+def upsert_rows(rows, state, tax_year, source, dry_run):
     state = state.upper()
     if state not in VALID_STATES:
         raise SystemExit(f"'{state}' is not a valid US state code.")
 
-    with open(path, newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        index = _build_index(reader.fieldnames, fmt)
-        rows = list(reader)
-
     if dry_run:
-        print(f"Column mapping: {index}")
         for row in rows[:5]:
-            print({
-                "county": row.get(index["county"], "").strip(),
-                "jurisdiction": row.get(index["jurisdiction"], "").strip(),
-                "school_district": row.get(index.get("school_district", ""), "").strip(),
-                "homestead_mills": _mills(row, index, "homestead_mills", as_percent),
-                "non_homestead_mills": _mills(row, index, "non_homestead_mills", as_percent),
-            })
+            print(row)
         print(f"\nDry run: {len(rows)} rows would be imported for {state} {tax_year}.")
         return
 
+    # Some source exports (Michigan's included) list the same county/jurisdiction/
+    # school district twice with different mill totals — real overlapping tax code
+    # areas within one township (e.g. a village or special-assessment district
+    # covering only part of it) that this schema has no column to disambiguate.
+    # Importing either number as "authoritative" would be a guess, so skip the
+    # whole ambiguous key rather than picking one arbitrarily.
+    key_counts = Counter((r["county"], r["jurisdiction"], r["school_district"]) for r in rows)
+    ambiguous = {key for key, count in key_counts.items() if count > 1}
+
     init_db()
     db = SessionLocal()
-    inserted = updated = skipped = 0
+    inserted = updated = skipped = ambiguous_skipped = 0
     try:
         for row in rows:
-            county = (row.get(index["county"]) or "").strip()
-            jurisdiction = (row.get(index["jurisdiction"]) or "").strip()
+            county = row["county"]
+            jurisdiction = row["jurisdiction"]
             if not county or not jurisdiction:
                 skipped += 1
                 continue
-            school = (row.get(index.get("school_district", "")) or "").strip()
-            homestead = _mills(row, index, "homestead_mills", as_percent)
-            non_homestead = _mills(row, index, "non_homestead_mills", as_percent)
+            school = row["school_district"]
+            if (county, jurisdiction, school) in ambiguous:
+                ambiguous_skipped += 1
+                continue
+            homestead = row["homestead_mills"]
+            non_homestead = row["non_homestead_mills"]
             if not homestead and not non_homestead:
                 skipped += 1
                 continue
@@ -158,7 +228,19 @@ def import_csv(path, state, tax_year, fmt, source, as_percent, dry_run):
         db.commit()
     finally:
         db.close()
-    print(f"{state} {tax_year}: {inserted} inserted, {updated} updated, {skipped} skipped.")
+    print(f"{state} {tax_year}: {inserted} inserted, {updated} updated, {skipped} skipped, "
+          f"{ambiguous_skipped} skipped as ambiguous (duplicate key, conflicting rates).")
+
+
+def import_csv(path, state, tax_year, fmt, source, as_percent, dry_run):
+    if fmt == "mi-treasury-raw":
+        rows = parse_mi_treasury_raw(path)
+    else:
+        with open(path, newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            index = _build_index(reader.fieldnames, fmt)
+            rows = _normalize_rows(reader, index, as_percent)
+    upsert_rows(rows, state, tax_year, source, dry_run)
 
 
 def main():
@@ -167,7 +249,8 @@ def main():
     parser.add_argument("csv_path", help="Path to the millage rate CSV")
     parser.add_argument("--state", required=True, help="Two-letter state code, e.g. MI")
     parser.add_argument("--tax-year", type=int, required=True)
-    parser.add_argument("--format", dest="fmt", choices=sorted(COLUMN_ALIASES), default="generic")
+    parser.add_argument("--format", dest="fmt",
+                        choices=sorted(COLUMN_ALIASES) + ["mi-treasury-raw"], default="generic")
     parser.add_argument("--source", default="", help="Attribution shown to users")
     parser.add_argument("--rates-are-percent", action="store_true",
                         help="Input column is a percentage of taxable value, not mills")

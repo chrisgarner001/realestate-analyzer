@@ -50,6 +50,15 @@
   .risk-badge-high { background: rgba(239,68,68,.18); color: #fca5a5; }
   .risk-badge-medium { background: rgba(216,168,61,.18); color: #f0c45b; }
   .risk-badge-low { background: rgba(45,155,88,.18); color: #86efac; }
+  .risk-matrix-grid { margin: 0.5rem 0 1rem; }
+  .risk-matrix-header-row, .risk-matrix-row { display: grid; grid-template-columns: 76px repeat(3, 1fr); gap: 3px; }
+  .risk-matrix-header-row { margin-bottom: 3px; }
+  .risk-matrix-header-cell { text-align: center; font-size: 0.65rem; font-weight: 700; color: var(--muted); padding-bottom: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .risk-matrix-body { display: flex; flex-direction: column; gap: 3px; }
+  .risk-matrix-row-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-size: 0.65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .risk-matrix-cell { min-height: 46px; border-radius: 8px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 5px; }
+  .risk-matrix-chip { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 9999px; background: var(--navy-mid); border-width: 2px; border-style: solid; font-size: 0.68rem; font-weight: 700; color: var(--text); cursor: default; }
+  .risk-matrix-caption { font-size: 0.65rem; color: var(--muted); margin-top: 6px; display: flex; justify-content: space-between; }
   .stream-content code { background: var(--navy-mid); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em; color: #93c5fd; }
   .stream-content pre { background: var(--navy-mid); padding: 0.75rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
   .stream-content pre code { background: none; padding: 0; color: #93c5fd; }
@@ -443,10 +452,32 @@
         </div>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px overflow-hidden rounded-lg" style="background:var(--border);border:1px solid var(--border)">
-        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Purchase Price</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getPropertyPrice())"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)">
+          <p class="text-xs" style="color:var(--muted)">Purchase Price</p>
+          <span class="mt-1 flex items-center gap-1">
+            <span class="text-sm font-semibold" style="color:var(--text)">$</span>
+            <input x-model="askingPrice" type="text" inputmode="numeric" placeholder="0"
+              class="w-full min-w-0 rounded px-1.5 py-0.5 text-sm font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+          </span>
+        </div>
         <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Suggested Offer</p><p class="mt-1 text-sm font-semibold" style="color:var(--gold-light)" x-text="formatCurrency(getSuggestedOffer())"></p></div>
-        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Rehab Budget</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getRehabAmount())"></p></div>
-        <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Market Rent</p><p class="mt-1 text-sm font-semibold" x-text="formatCurrency(getLiveRentalSummary()?.monthlyRent)+'/mo'"></p></div>
+        <div class="p-3" style="background:var(--navy-mid)">
+          <p class="text-xs" style="color:var(--muted)">Rehab Budget</p>
+          <span class="mt-1 flex items-center gap-1">
+            <span class="text-sm font-semibold" style="color:var(--text)">$</span>
+            <input x-model="rehabCost" type="text" inputmode="numeric" placeholder="0"
+              class="w-full min-w-0 rounded px-1.5 py-0.5 text-sm font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+          </span>
+        </div>
+        <div class="p-3" style="background:var(--navy-mid)">
+          <p class="text-xs" style="color:var(--muted)">Market Rent</p>
+          <span class="mt-1 flex items-center gap-1">
+            <span class="text-sm font-semibold" style="color:var(--text)">$</span>
+            <input x-model="rentOverride" type="number" min="0" step="50" placeholder="0"
+              class="w-full min-w-0 rounded px-1.5 py-0.5 text-sm font-semibold" style="background:var(--navy-deep);border:1px solid var(--border);color:var(--text)">
+            <span class="text-xs flex-shrink-0" style="color:var(--muted)">/mo</span>
+          </span>
+        </div>
         <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">Cash Flow</p><p class="mt-1 text-sm font-semibold" :style="getLiveRentalSummary()?.monthlyCashFlow>=0?'color:#4ade80':'color:#f87171'" x-text="formatCurrency(getLiveRentalSummary()?.monthlyCashFlow)+'/mo'"></p></div>
         <div class="p-3" style="background:var(--navy-mid)"><p class="text-xs" style="color:var(--muted)">DSCR</p><p class="mt-1 text-sm font-semibold" :style="getDSCRCard()?.comfortable?'color:#4ade80':getDSCRCard()?.qualifies?'color:#f0c45b':'color:#f87171'" x-text="getDSCRCard()?.dscr"></p></div>
       </div>
@@ -670,6 +701,8 @@
                     ? 'background:rgba(45,138,78,.18);color:var(--green-light)'
                     : 'background:rgba(249,115,22,.15);color:#f97316'"
                   x-text="taxEstimate?.method === 'millage' ? 'Local millage rates' : 'Statewide estimate'"></span>
+            <span x-show="taxEstimate?.jurisdiction" class="text-xs" style="color:var(--muted)"
+                  x-text="[taxEstimate?.jurisdiction?.jurisdiction, taxEstimate?.jurisdiction?.county ? taxEstimate?.jurisdiction?.county + ' County' : '', taxEstimate?.jurisdiction?.school_district].filter(Boolean).join(' · ')"></span>
           </div>
           <div class="flex items-center gap-3">
             <label class="flex items-center gap-2 text-xs cursor-pointer" style="color:var(--muted)">
@@ -775,6 +808,10 @@
             <p class="text-xs flex gap-2" style="color:var(--muted)"><span style="color:#f97316">▲</span><span x-text="warning"></span></p>
           </template>
           <p x-show="taxEstimate?.source" class="text-[10px] pt-1" style="color:var(--muted)" x-text="'Source: ' + taxEstimate?.source"></p>
+        </div>
+
+        <div x-show="taxEstimate" x-cloak class="disclaimer px-4 py-2" style="background:var(--navy-deep)">
+          <p>These figures are based on the latest published tax tables by the property's state. Please verify these figures with the taxing authority.</p>
         </div>
       </div>
 
@@ -1281,6 +1318,7 @@ function app() {
     pdfInclude: { offer:true, underwriting:true, comparables:true, scoreDashboard:true,
                   finance:true, investment:true, keyFindings:true, redFlags:true,
                   analysis:true, nextSteps:true },
+    sectionInclude: {},
     address:'', streetAddress:'', city:'', state:'', zip:'', address2:'', analysisType:'full', askingPrice:'', rehabCost:'',
     price:'', beds:'', baths:'', sqft:'', yearBuilt:'', propertyType:'', hoa:'',
     showAdvanced: false,
@@ -1474,6 +1512,7 @@ function app() {
       this.analysisType = report.analysis_type || 'full';
       this.streamText = report.report_text || '';
       this.scoreData = null;
+      this.sectionInclude = {};
       this.errorMsg = '';
       this.deliveryMsg = 'Viewing a previous completed report.';
       this.hasResults = Boolean(this.streamText);
@@ -1514,7 +1553,7 @@ function app() {
 
     clearResults() {
       this.hasResults=false; this.streamText=''; this.scoreData=null; this.currentReportId=null;
-      this.errorMsg=''; this.askingPrice='';
+      this.errorMsg=''; this.askingPrice=''; this.sectionInclude={};
     },
 
     async exportPdf() {
@@ -1524,6 +1563,8 @@ function app() {
       const addr = this.address.replace(/[^a-z0-9]/gi,'-').toLowerCase().slice(0,40);
       const excludedKeys = Object.keys(this.pdfInclude).filter(k => !this.pdfInclude[k]);
       const excludedCss = excludedKeys.map(k => `#pdf-content [data-pdf-key="${k}"]{display:none!important}`).join('\n        ');
+      const excludedSectionKeys = Object.keys(this.sectionInclude).filter(k => !this.sectionInclude[k]);
+      const excludedSectionCss = excludedSectionKeys.map(k => `#pdf-content [data-section-key="${k}"]{display:none!important}`).join('\n        ');
       const style = document.createElement('style');
       style.id = 'pdf-light-override';
       style.textContent = `
@@ -1543,6 +1584,7 @@ function app() {
         #pdf-content .score-ring-bg{stroke:#e2e8f0!important}
         #pdf-content .pdf-toggle{display:none!important}
         ${excludedCss}
+        ${excludedSectionCss}
       `;
       document.head.appendChild(style);
       try {
@@ -1663,28 +1705,107 @@ function app() {
         const report = new DOMParser().parseFromString(html, 'text/html');
         const heading = [...report.querySelectorAll('h1, h2, h3')]
           .find((element) => element.textContent.trim().toLowerCase() === 'risk matrix');
-        if (!heading) return html;
 
-        let sibling = heading.nextElementSibling;
         let table = null;
-        while (sibling && !table) {
-          table = sibling.tagName === 'TABLE' ? sibling : sibling.querySelector('table');
-          sibling = sibling.nextElementSibling;
+        if (heading) {
+          let sibling = heading.nextElementSibling;
+          while (sibling && !table) {
+            table = sibling.tagName === 'TABLE' ? sibling : sibling.querySelector('table');
+            sibling = sibling.nextElementSibling;
+          }
         }
-        if (!table) return html;
+        if (table) {
+          const headers = [...table.querySelectorAll('th')];
+          const classify = (text) => {
+            const t = (text || '').toLowerCase();
+            if (t.includes('high')) return 'high';
+            if (t.includes('medium') || t.includes('moderate')) return 'medium';
+            if (t.includes('low')) return 'low';
+            return '';
+          };
+          const riskColumns = headers
+            .map((header, index) => ({ index, name: header.textContent.trim().toLowerCase() }))
+            .filter(({ name }) => ['severity', 'likelihood', 'impact'].includes(name));
+          const riskNameCol = headers.findIndex((h) => h.textContent.trim().toLowerCase() === 'risk');
+          const severityCol = riskColumns.find((c) => c.name === 'severity' || c.name === 'impact');
+          const likelihoodCol = riskColumns.find((c) => c.name === 'likelihood');
 
-        const riskColumns = [...table.querySelectorAll('th')]
-          .map((header, index) => ({ index, name: header.textContent.trim().toLowerCase() }))
-          .filter(({ name }) => ['severity', 'likelihood', 'impact'].includes(name));
-        table.querySelectorAll('tbody tr').forEach((row) => {
-          const cells = row.querySelectorAll('td');
-          riskColumns.forEach(({ index }) => {
-            const cell = cells[index];
-            const level = cell?.textContent.trim().toLowerCase();
-            const badgeClass = level?.includes('high') ? 'high' : level?.includes('medium') || level?.includes('moderate') ? 'medium' : level?.includes('low') ? 'low' : '';
-            if (cell && badgeClass) cell.innerHTML = `<span class="risk-badge risk-badge-${badgeClass}">${cell.innerHTML}</span>`;
+          const gridItems = [];
+          table.querySelectorAll('tbody tr').forEach((row, rowIndex) => {
+            const cells = row.querySelectorAll('td');
+            riskColumns.forEach(({ index }) => {
+              const cell = cells[index];
+              const badgeClass = classify(cell?.textContent.trim());
+              if (cell && badgeClass) cell.innerHTML = `<span class="risk-badge risk-badge-${badgeClass}">${cell.innerHTML}</span>`;
+            });
+            if (severityCol && likelihoodCol) {
+              const sev = classify(cells[severityCol.index]?.textContent.trim());
+              const lik = classify(cells[likelihoodCol.index]?.textContent.trim());
+              if (sev && lik) {
+                gridItems.push({
+                  n: rowIndex + 1,
+                  name: (riskNameCol >= 0 ? cells[riskNameCol]?.textContent.trim() : '') || `Risk ${rowIndex + 1}`,
+                  sev, lik,
+                });
+              }
+            }
           });
+
+          if (gridItems.length) {
+            const levelColor = { low: '#2d9b58', medium: '#d8a83d', high: '#ef4444' };
+            const levelScore = { low: 0, medium: 1, high: 2 };
+            const cellTint = (sev, lik) => {
+              const score = levelScore[sev] + levelScore[lik];
+              if (score >= 3) return 'rgba(239,68,68,.14)';
+              if (score >= 1) return 'rgba(216,168,61,.12)';
+              return 'rgba(45,155,88,.10)';
+            };
+            const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            let gridHtml = '<div class="risk-matrix-header-row"><div></div>'
+              + ['Low', 'Medium', 'High'].map((l) => `<div class="risk-matrix-header-cell">${l}</div>`).join('')
+              + '</div><div class="risk-matrix-body">';
+            ['high', 'medium', 'low'].forEach((sev) => {
+              gridHtml += `<div class="risk-matrix-row"><div class="risk-matrix-row-label">${sev}</div>`;
+              ['low', 'medium', 'high'].forEach((lik) => {
+                const items = gridItems.filter((g) => g.sev === sev && g.lik === lik);
+                gridHtml += `<div class="risk-matrix-cell" style="background:${cellTint(sev, lik)}">`
+                  + items.map((it) => `<span class="risk-matrix-chip" style="border-color:${levelColor[it.sev]}" title="${esc(it.name)}">${it.n}</span>`).join('')
+                  + '</div>';
+              });
+              gridHtml += '</div>';
+            });
+            gridHtml += '</div><div class="risk-matrix-caption"><span>↑ Severity</span><span>Likelihood →</span></div>';
+            const gridWrap = document.createElement('div');
+            gridWrap.className = 'risk-matrix-grid';
+            gridWrap.innerHTML = gridHtml;
+            table.parentElement.insertBefore(gridWrap, table);
+          }
+        }
+
+        [...report.body.querySelectorAll('h3')].forEach((h3, i) => {
+          const title = h3.textContent.trim();
+          if (!title) return;
+          const slug = title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || `sub-${i}`;
+          const key = `${slug}-${i}`;
+          if (this.sectionInclude[key] === undefined) this.sectionInclude[key] = true;
+          const wrapper = document.createElement('div');
+          wrapper.className = 'analysis-subsection';
+          wrapper.setAttribute('data-section-key', key);
+          h3.replaceWith(wrapper);
+          wrapper.appendChild(h3);
+          let node = wrapper.nextSibling;
+          while (node && !/^H[1-3]$/.test(node.tagName || '')) {
+            const next = node.nextSibling;
+            wrapper.appendChild(node);
+            node = next;
+          }
+          const toggle = document.createElement('label');
+          toggle.className = 'pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none';
+          toggle.style.cssText = 'float:right;color:var(--muted);font-weight:400;';
+          toggle.innerHTML = `<input type="checkbox" x-model="sectionInclude['${key}']" class="rounded"> Include in final report`;
+          h3.appendChild(toggle);
         });
+
         return report.body.innerHTML;
       } catch(e) { return text; }
     },
@@ -1721,6 +1842,7 @@ function app() {
             data.signal=this.signalFromScore(data.market_score);
           }
           this.scoreData=data;
+          if (!this.askingPrice) { const p = this.getPropertyPrice(); if (p) this.askingPrice = String(p); }
           if (!this.rentOverride) this.rentOverride = this.getModerateMonthlyRent();
           if (!this.suggestedOfferOverride) this.suggestedOfferOverride = this.getReportSuggestedOffer();
           if (!this.arvOverride) this.arvOverride = this.getEstimatedARV();
@@ -2222,7 +2344,7 @@ function app() {
       if (!this.canAnalyze()||this.analyzing) return;
       this.address = this.getComposedAddress();
       this.resetInvestmentCardPosition();
-      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.rentalCompSelections={}; this.customSaleComps=[]; this.customRentalComps=[]; this.newSaleComp=null; this.newRentalComp=null; this.rentOverride=''; this.suggestedOfferOverride=''; this.arvOverride='';
+      this.analyzing=true; this.hasResults=true; this.errorMsg=''; this.deliveryMsg=''; this.streamText=''; this.scoreData=null; this.saleCompSelections={}; this.rentalCompSelections={}; this.customSaleComps=[]; this.customRentalComps=[]; this.newSaleComp=null; this.newRentalComp=null; this.rentOverride=''; this.suggestedOfferOverride=''; this.arvOverride=''; this.sectionInclude={};
       this.statusIndex=0;
       clearInterval(this.statusTimer);
       this.statusTimer=setInterval(()=>{ this.statusIndex=(this.statusIndex+1)%this.analysisStatuses.length; }, 3500);

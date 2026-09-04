@@ -254,10 +254,33 @@ Provide 4-6 comps in a table (Address | Sale Price | Sq Ft | $/Sq Ft | Beds/Ba |
 Start with a Rental Comparable table (Address / neighborhood | Rent | Beds/Ba | Sq Ft | Distance | Listed/Leased Date | Condition/Features | Source), then state the search radius, rent range, selected market rent, and confidence. Show full expense model for 3 scenarios (Conservative/Moderate/Optimistic). Calculate: Cap Rate, Cash-on-Cash, GRM, DSCR. Use 20% down, 30yr fixed ~7.0%.
 
 ## Neighborhood Quality
-Schools (elementary/middle/high ratings), safety/crime vs national avg, Walk Score, demographics (median income, population trend), top employers within 15 miles.
+### Schools
+Elementary/middle/high school ratings.
+
+### Safety & Crime
+Crime rate vs national average.
+
+### Walk Score
+Walkability and access to amenities.
+
+### Demographics
+Median income and population trend.
+
+### Top Employers
+Top employers within 15 miles.
 
 ## Investment Analysis
-Buy & Hold (5yr & 10yr projections), BRRRR (ARV, rehab, refi math, 70% rule check), Fix & Flip (profit, ROI, 70% rule). Recommend best strategy.
+### Strategy 1: Buy & Hold
+5yr & 10yr projections.
+
+### Strategy 2: BRRRR
+ARV, rehab, refi math, 70% rule check.
+
+### Strategy 3: Fix & Flip
+Profit, ROI, 70% rule check.
+
+### Recommended Strategy
+Which of the three is best for this property and why.
 
 ## Market Conditions
 Market classification (buyer/seller/balanced), YoY price trend, months of inventory, days on market, economic drivers, 12-month outlook.
