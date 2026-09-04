@@ -715,6 +715,11 @@
         </div>
 
         <!-- Cascading jurisdiction picker, mirroring the state estimator UX -->
+        <div x-show="taxPanelOpen" x-cloak class="px-4 pt-3" style="background:var(--navy-deep)">
+          <p class="text-xs leading-relaxed" style="color:var(--muted)">
+            To pull the <strong style="color:var(--text)">actual local millage rate</strong> instead of a statewide estimate, select the property's <strong style="color:var(--text)">County</strong>, then its <strong style="color:var(--text)">City / Township / Village</strong>, then its <strong style="color:var(--text)">School District</strong> below — each choice narrows the next. Local data is only available in select states; if a dropdown says "No local data," a statewide estimate is used instead.
+          </p>
+        </div>
         <div x-show="taxPanelOpen" x-cloak class="px-4 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs" style="background:var(--navy-deep)">
           <label class="flex flex-col gap-1" style="color:var(--muted)">
             State
@@ -810,8 +815,8 @@
           <p x-show="taxEstimate?.source" class="text-[10px] pt-1" style="color:var(--muted)" x-text="'Source: ' + taxEstimate?.source"></p>
         </div>
 
-        <div x-show="taxEstimate" x-cloak class="disclaimer px-4 py-2" style="background:var(--navy-deep)">
-          <p>These figures are based on the latest published tax tables by the property's state. Please verify these figures with the taxing authority.</p>
+        <div x-show="taxEstimate" x-cloak class="disclaimer px-4 py-2" style="background:var(--navy-deep);border-top:1px solid var(--border)">
+          <p class="text-xs font-bold" style="color:#ef4444">These figures are based on the latest published tax tables by the property's state. Please verify these figures with the taxing authority.</p>
         </div>
       </div>
 
@@ -1006,8 +1011,14 @@
         <p class="px-3 py-2 text-xs" style="background:var(--navy-mid);color:var(--muted)">Includes 3% acquisition and 8% selling costs. Add financing, utilities, and holding costs before committing.</p>
       </div>
 
+      <div data-pdf-key="landContract">
       <div class="mb-4 rounded-xl p-3" style="border:1px solid var(--border);background:var(--navy-mid)">
-        <p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:var(--muted)">Additional Strategy</p>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-semibold uppercase tracking-wide" style="color:var(--muted)">Additional Strategy</p>
+          <label class="pdf-toggle flex items-center gap-1.5 text-xs cursor-pointer select-none" style="color:var(--muted)">
+            <input type="checkbox" x-model="pdfInclude.landContract" class="rounded"> Include in final report
+          </label>
+        </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-base font-bold" style="color:var(--text)">Land Contract Sale</p>
@@ -1116,6 +1127,7 @@
       <p class="text-xs mt-3" style="color:var(--muted)">
         You retain title until the note is paid in full · Buyer pays all PITI to you monthly · Tax &amp; insurance escrowed and passed through · Interest income declines as principal amortizes
       </p>
+      </div>
     </div>
 
     <!-- Key Findings & Red Flags -->
@@ -1316,7 +1328,7 @@ function app() {
     // ── Analysis state ──────────────────────────────────────────────
     deliveryMsg:'',
     pdfInclude: { offer:true, underwriting:true, comparables:true, scoreDashboard:true,
-                  finance:true, investment:true, keyFindings:true, redFlags:true,
+                  finance:true, investment:true, landContract:true, keyFindings:true, redFlags:true,
                   analysis:true, nextSteps:true },
     sectionInclude: {},
     address:'', streetAddress:'', city:'', state:'', zip:'', address2:'', analysisType:'full', askingPrice:'', rehabCost:'',

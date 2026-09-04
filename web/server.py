@@ -50,7 +50,11 @@ app.add_middleware(
 )
 
 MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 8192
+# The full report now has ~9 required subheadings plus comps/rental tables and
+# a risk matrix; 8192 was cutting the response off before reaching Risk Matrix
+# / Bottom Line on longer properties. Sonnet 4.6 supports up to 128K output
+# tokens when streaming (already the case here), so this has ample headroom.
+MAX_TOKENS = 16000
 
 # Analysis types that benefit from live web search (comps, rents, market data)
 WEB_SEARCH_TYPES = {"full", "quick", "comps", "rental", "invest", "neighborhood", "market", "flip", "listing", "screen", "compare"}
