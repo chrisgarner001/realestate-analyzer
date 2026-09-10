@@ -174,6 +174,19 @@ class MillageRate(Base):
     )
 
 
+class TokenPurchase(Base):
+    """Audit trail for self-serve Stripe token top-ups (one row per Checkout Session)."""
+    __tablename__ = "token_purchases"
+    id                = Column(Integer, primary_key=True, index=True)
+    tenant_id         = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    stripe_session_id = Column(String(200), unique=True, nullable=False, index=True)
+    token_count       = Column(Integer, nullable=False)
+    amount_cents      = Column(Integer, nullable=False)
+    currency          = Column(String(10), default="usd")
+    status            = Column(String(20), default="completed")  # completed | failed
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
     id           = Column(Integer, primary_key=True, index=True)

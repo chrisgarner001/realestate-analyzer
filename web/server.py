@@ -3,7 +3,7 @@
 Real Estate Investor Property Analyzer — Multi-Tenant Web Server
 Run: python server.py
 """
-import os, json, sys, re, smtplib, csv, io, hashlib, secrets
+import os, json, sys, re, smtplib, csv, io, hashlib, secrets, string
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
@@ -17,12 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 import anthropic
+import stripe
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 import database, auth, property_tax
-from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken, MillageRate
+from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken, MillageRate, TokenPurchase
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -67,6 +69,18 @@ def get_client():
     if not key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not set. Add it to your .env file.")
     return anthropic.Anthropic(api_key=key)
+
+def get_stripe_client():
+    key = os.getenv("STRIPE_SECRET_KEY")
+    if not key:
+        raise HTTPException(500, "STRIPE_SECRET_KEY not set. Add it to your .env file.")
+    return stripe.StripeClient(api_key=key)
+
+# $5/token standard rate; $4/token bulk rate at the 100-token pack.
+TOKEN_PACKS = {
+    "pack_10":  {"token_count": 10,  "amount_cents": 5000,  "label": "10 tokens — $50"},
+    "pack_100": {"token_count": 100, "amount_cents": 40000, "label": "100 tokens — $400 (bulk rate, $4/token)"},
+}
 
 class AnalysisRequest(BaseModel):
     address: str
@@ -1322,6 +1336,99 @@ async def admin_allocate_tokens(user_id: int, req: AllocateTokensRequest,
     user.token_balance = (user.token_balance or 0) + req.amount
     db.commit()
     return {"ok": True, "agent_tokens": user.token_balance, "tenant_tokens": tenant.token_balance}
+
+class CheckoutRequest(BaseModel):
+    pack_id: str
+
+@app.post("/api/tenant/checkout")
+async def create_token_checkout(req: CheckoutRequest,
+                                current_user: User = Depends(auth.require_admin),
+                                db: Session = Depends(get_db)):
+    """Self-serve token top-up: tenant admin buys a fixed pack via Stripe Checkout.
+    tenant_id always comes from the authenticated session, never client input,
+    so a tenant admin can only ever credit their own tenant's balance."""
+    if not current_user.tenant_id:
+        raise HTTPException(400, "Superadmin accounts have no tenant to purchase tokens for")
+    pack = TOKEN_PACKS.get(req.pack_id)
+    if not pack:
+        raise HTTPException(400, "Unknown token pack")
+    tenant = db.query(Tenant).filter_by(id=current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(404, "Tenant not found")
+
+    client = get_stripe_client()
+    base_url = os.getenv("PUBLIC_APP_URL", "").rstrip("/") or "https://propmind.ai"
+    admin_path = f"/{tenant.slug}/admin"
+    session = client.v1.checkout.sessions.create({
+        "mode": "payment",
+        "line_items": [{
+            "quantity": 1,
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": pack["amount_cents"],
+                "product_data": {"name": f"PropYield — {pack['label']}"},
+            },
+        }],
+        "success_url": f"{base_url}{admin_path}?tokens_purchase=success",
+        "cancel_url": f"{base_url}{admin_path}?tokens_purchase=cancelled",
+        "client_reference_id": str(tenant.id),
+        "metadata": {"tenant_id": str(tenant.id), "token_count": str(pack["token_count"])},
+        "integration_identifier": "propyield_tokens_" + "".join(secrets.choice(string.ascii_lowercase) for _ in range(8)),
+        # Managed Payments makes Stripe the merchant of record and takes on global
+        # tax compliance — a business decision, not a default to fall into just to
+        # satisfy a missing-product-tax-code error. Left off deliberately; tax/pricing
+        # strategy is explicitly out of scope for this wedge (see design doc).
+        "managed_payments": {"enabled": False},
+    })
+    return {"checkout_url": session.url}
+
+@app.post("/api/stripe/webhook")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    """Not gated by session auth — Stripe calls this without a session cookie.
+    Authenticity comes entirely from the signature check below, so the raw
+    body must be read before any JSON parsing touches it."""
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    if not webhook_secret:
+        raise HTTPException(500, "STRIPE_WEBHOOK_SECRET not set")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except (ValueError, stripe.SignatureVerificationError):
+        raise HTTPException(400, "Invalid Stripe webhook signature")
+
+    event_type = event["type"]
+    if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        # .to_dict() up front — event["data"]["object"] is a StripeObject, and
+        # its .get() raises AttributeError (only subscript access works on it).
+        session_obj = event["data"]["object"].to_dict()
+        if session_obj.get("payment_status") == "unpaid":
+            return {"ok": True}  # delayed-notification method still pending; wait for the async event
+        _credit_tenant_tokens(db, session_obj)
+    elif event_type == "checkout.session.async_payment_failed":
+        session_obj = event["data"]["object"].to_dict()
+        db.query(TokenPurchase).filter_by(stripe_session_id=session_obj["id"]).update({"status": "failed"})
+        db.commit()
+    return {"ok": True}
+
+def _credit_tenant_tokens(db: Session, session_obj: dict):
+    tenant_id = int(session_obj["metadata"]["tenant_id"])
+    token_count = int(session_obj["metadata"]["token_count"])
+    stripe_session_id = session_obj["id"]
+    try:
+        purchase = TokenPurchase(
+            tenant_id=tenant_id, stripe_session_id=stripe_session_id,
+            token_count=token_count, amount_cents=session_obj.get("amount_total") or 0,
+            currency=session_obj.get("currency") or "usd", status="completed",
+        )
+        db.add(purchase)
+        tenant = db.query(Tenant).filter_by(id=tenant_id).first()
+        if tenant:
+            tenant.token_balance = (tenant.token_balance or 0) + token_count
+        db.commit()
+    except IntegrityError:
+        # stripe_session_id already recorded — a webhook retry, not a new purchase.
+        db.rollback()
 
 @app.post("/api/admin/users/{user_id}/reset-usage")
 async def admin_reset_usage(user_id: int, current_user: User = Depends(auth.require_admin),

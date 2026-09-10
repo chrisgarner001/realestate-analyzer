@@ -165,8 +165,20 @@
           <p class="text-xs" style="color:var(--muted)">Tenant analysis tokens available</p>
           <p class="text-2xl font-bold" style="color:var(--gold-light)" x-text="tenant&&tenant.token_balance||0"></p>
         </div>
-        <p class="text-xs max-w-sm" style="color:var(--muted)">Allocate prepaid analysis tokens to agents below. Each completed analysis uses one token.</p>
+        <div class="flex items-center gap-3">
+          <p class="text-xs max-w-sm" style="color:var(--muted)">Allocate prepaid analysis tokens to agents below. Each completed analysis uses one token.</p>
+          <div class="flex items-center gap-2">
+            <select x-model="buyPackId" class="rounded-lg px-2 py-2 text-xs" style="background:var(--navy-mid);color:var(--muted)">
+              <option value="pack_10">10 tokens — $50</option>
+              <option value="pack_100">100 tokens — $400 (bulk rate)</option>
+            </select>
+            <button @click="buyTokens()" :disabled="buyingTokens"
+              class="btn-primary text-xs font-semibold px-4 py-2 rounded-lg whitespace-nowrap"
+              x-text="buyingTokens ? 'Redirecting…' : 'Buy Tokens'"></button>
+          </div>
+        </div>
       </div>
+      <div x-show="buyTokensMsg" class="card rounded-xl p-3 text-xs" style="background:rgba(239,68,68,.08);color:#f87171" x-text="buyTokensMsg"></div>
 
       <!-- Add user form -->
       <div x-show="tab==='realtors'" class="card rounded-xl p-5">
@@ -594,6 +606,9 @@ function admin() {
     newUser: { full_name:'', email:'', password:'' },
     userMsg: '', userMsgType: 'ok',
 
+    // Token purchasing
+    buyPackId: 'pack_10', buyingTokens: false, buyTokensMsg: '',
+
     // Activity
     analyses: [], loadingActivity: false, exportingActivity: false, activitySearch: '', activityPage: 0, activityLimit: 50,
 
@@ -650,12 +665,43 @@ function admin() {
               this.currentUser = u;
               await this.loadTenant();
               await this.loadUsers();
+              this.checkTokenPurchaseRedirect();
               return;
             }
           }
         } catch(e) {}
         localStorage.removeItem('re_admin_token');
       }
+    },
+
+    checkTokenPurchaseRedirect() {
+      const params = new URLSearchParams(location.search);
+      const result = params.get('tokens_purchase');
+      if (result === 'success') {
+        this.buyTokensMsg = 'Payment received — tokens will appear in your balance within a minute.';
+      } else if (result === 'cancelled') {
+        this.buyTokensMsg = 'Checkout cancelled — no charge was made.';
+      }
+      if (result) {
+        params.delete('tokens_purchase');
+        const clean = location.pathname + (params.toString() ? `?${params}` : '');
+        history.replaceState({}, '', clean);
+        setTimeout(() => this.buyTokensMsg = '', 8000);
+      }
+    },
+
+    async buyTokens() {
+      this.buyingTokens = true; this.buyTokensMsg = '';
+      try {
+        const r = await fetch('/api/tenant/checkout', {
+          method: 'POST', headers: { ...this.authHeaders(), 'Content-Type':'application/json' },
+          body: JSON.stringify({ pack_id: this.buyPackId })
+        });
+        const d = await r.json();
+        if (!r.ok) { this.buyTokensMsg = d.detail || 'Could not start checkout'; return; }
+        location.href = d.checkout_url;
+      } catch(e) { this.buyTokensMsg = 'Connection error'; }
+      finally { this.buyingTokens = false; }
     },
 
     async login() {
