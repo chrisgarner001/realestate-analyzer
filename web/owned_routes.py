@@ -72,7 +72,7 @@ def require_owned_access(current_user: User = Depends(auth.get_current_user), db
         return current_user
     tenant = db.query(Tenant).filter_by(id=current_user.tenant_id).first() if current_user.tenant_id else None
     if not tenant or not tenant.asset_analysis_enabled:
-        raise HTTPException(403, "Hold / Sell / Refi isn't enabled for your company. Contact your PropYield admin.")
+        raise HTTPException(403, "Owned-property exit analysis isn't enabled for your company. Contact your PropYield admin.")
     return current_user
 
 
@@ -208,6 +208,10 @@ def _property_inputs(db: Session, row: OwnedBatchRow, estimates: Optional[dict])
             sources[k] = "DATA"
             if est.get("sources", {}).get(k):
                 sources[k + "_detail"] = est["sources"][k]
+    if base.get("rehab_budget") is None and est.get("rehab_estimate") is not None:
+        base["rehab_budget"] = est["rehab_estimate"]
+        sources["rehab_budget"] = "DATA"
+        sources["rehab_budget_detail"] = "estimated from notes, age and size"
     kwargs = {k: v for k, v in base.items() if k in {f.name for f in dc_fields(owned_asset.PropertyInputs)}}
     kwargs["stale_loan_statement"] = stale
     kwargs["sources"] = sources
@@ -236,6 +240,7 @@ Use web search to find current market data for ONE property. Return ONLY a JSON 
  "dom_as_is_days": <number>, "dom_renovated_days": <number>,
  "appreciation_pct": <number, local 5-year average annual appreciation>,
  "months_of_supply": <number>,
+ "rehab_estimate": <number, cost to bring it to retail-ready condition from the notes, age and size; null if the rehab quote is given>,
  "beds": <number or null>, "baths": <number or null>, "sqft": <number or null>, "year_built": <number or null>,
  "sources": {"as_is_value": "...", "arv": "...", "market_rent": "...", "appreciation_pct": "...", "facts": "..."},
  "comps": [{"address": "...", "price": <number>, "date": "YYYY-MM-DD", "condition": "..."}]}
@@ -319,7 +324,7 @@ def _estimate(row: OwnedBatchRow) -> dict:
         raise ValueError("estimate response was not JSON")
     out = {"sources": data.get("sources") or {}, "comps": data.get("comps") or []}
     for k in ("as_is_value", "arv", "market_rent", "dom_as_is_days", "dom_renovated_days", "appreciation_pct",
-              "months_of_supply", "beds", "baths", "sqft", "year_built"):
+              "months_of_supply", "rehab_estimate", "beds", "baths", "sqft", "year_built"):
         out[k] = _num(data.get(k))
     return out
 
@@ -404,7 +409,9 @@ def _maybe_send_summary(db: Session, batch_id: int):
     db.commit()
     if claimed != 1:
         return
-    body = summary_email_body(batch)
+    tenant = db.query(Tenant).filter_by(id=batch.tenant_id).first() if batch.tenant_id else None
+    base = os.getenv("PUBLIC_APP_URL", "").rstrip("/") or "https://app.propmind.ai"
+    body = summary_email_body(batch, f"{base}/{tenant.slug if tenant else ''}/portfolio?batch={batch.id}")
     admins = db.query(User).filter_by(tenant_id=batch.tenant_id, role="admin", is_active=True).all()
     s = _server()
     for admin in admins:
@@ -414,7 +421,7 @@ def _maybe_send_summary(db: Session, batch_id: int):
             print(f"Owned summary email failed for batch {batch.id}: {e}")
 
 
-def summary_email_body(batch: OwnedBatch) -> str:
+def summary_email_body(batch: OwnedBatch, link: str = "") -> str:
     done = [r for r in batch.rows if r.status == "done"]
     failed = [r for r in batch.rows if r.status.startswith("failed")]
     skipped = [r for r in batch.rows if r.status in ("skipped_pending", "excluded")]
@@ -436,7 +443,7 @@ def summary_email_body(batch: OwnedBatch) -> str:
              "", "Top 10 by dollars at stake:"]
     for stake, addr, strat in stakes[:10]:
         lines.append(f"  {addr} — {owned_asset.STRATEGY_LABELS.get(strat, strat)} — ${stake:,.0f}")
-    lines += ["", f"Open the batch in PropYield: /portfolio?batch={batch.id}"]
+    lines += ["", f"Open the batch in PropYield: {link}"]
     return "\n".join(lines)
 
 
@@ -504,6 +511,7 @@ def _batch_json(db: Session, batch: OwnedBatch, user: User) -> dict:
         "id": batch.id, "kind": batch.kind, "file_name": batch.file_name,
         "created_at": batch.created_at.isoformat() if batch.created_at else None,
         "status": _batch_status(batch), "assumptions": asdict(a), "rows": rows,
+        "assumption_defaults": asdict(owned_asset.Assumptions()),
         "statements": [_statement_json(s) for s in statements],
         "unconfirmed_statements": sum(1 for s in statements if not s.confirmed and s.status == "read" and s.row_id),
         "token_cost_per_property": hold_cost(),

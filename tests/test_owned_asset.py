@@ -283,7 +283,7 @@ class TestAnalyze:
     def test_shortfall_flag(self):
         out = analyze(_prop(loan_payoff=90000, loan_rate_pct=6, loan_pi=600, investor_payback=30000),
                       A, with_break_even=False)
-        assert any("IRES short" in f["message"] for f in out["flags"])
+        assert any("payback; short" in f["message"] for f in out["flags"])
 
     def test_servicer_downgrades_compliance_flag(self):
         out = analyze(_prop(), replace(A, lc_servicer="SGMS"), with_break_even=False)
@@ -310,3 +310,13 @@ class TestBreakEven:
         p = _prop(arv=82000, as_is_value=80000, market_rent=500, rehab_budget=10000)
         triggers = break_even(p, A, "sell_as_is", {"rehab_budget": 10000})
         assert all(t["variable"] == "rehab_budget" for t in triggers)
+
+
+class TestUnknownRehab:
+    def test_unknown_rehab_assumes_full_arv_lift_not_zero(self):
+        r = resolve(_prop(rehab_budget=None, as_is_value=90000, arv=110000), Assumptions())
+        assert r.rehab_budget == 20000 and r.sources["rehab_budget"] == "DEFAULT"
+
+    def test_known_rehab_kept(self):
+        r = resolve(_prop(rehab_budget=5000, as_is_value=90000, arv=110000), Assumptions())
+        assert r.rehab_budget == 5000

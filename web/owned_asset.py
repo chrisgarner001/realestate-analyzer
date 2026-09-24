@@ -256,7 +256,12 @@ def resolve(p: PropertyInputs, a: Assumptions) -> Resolved:
     as_is = p.as_is_value
     if arv is None and as_is is None:
         raise MissingInputError("as_is_value or arv is required (DATA estimate or user input)")
-    rehab_budget = tag("rehab_budget", p.rehab_budget, 0.0)
+    if p.rehab_budget is None and arv is not None and as_is is not None:
+        # Unknown rehab is not free: assume it consumes the whole ARV lift (conservative).
+        rehab_budget = max(0.0, arv - as_is)
+        src["rehab_budget"] = "DEFAULT"
+    else:
+        rehab_budget = tag("rehab_budget", p.rehab_budget, 0.0)
     if arv is None:
         arv = as_is + rehab_budget
         src["arv"] = "DEFAULT"
@@ -855,7 +860,7 @@ def preflight_flags(r: Resolved, scen: dict) -> list[dict]:
     for k, s in scen.items():
         if s.shortfall > 0:
             flags.append({"type": "risk", "severity": "critical",
-                          "message": f"{STRATEGY_LABELS[k]}: proceeds don't cover loan + investor payback; IRES short ${s.shortfall:,.0f}"})
+                          "message": f"{STRATEGY_LABELS[k]}: proceeds don't cover loan + investor payback; short ${s.shortfall:,.0f}"})
     for name in ("arv", "market_rent"):
         if r.sources.get(name) == "DEFAULT":
             flags.append({"type": "data", "severity": "warning",
@@ -911,7 +916,7 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
     if with_break_even:
         base_values = {"arv": r.arv, "market_rent": r.market_rent, "rehab_budget": r.rehab_budget}
         triggers = break_even(p, a, decision["strategy"], base_values)
-    assumptions_list = [{"name": k, "value": v, "source": "DEFAULT", "source_detail": "spec defaults / IRES standard"}
+    assumptions_list = [{"name": k, "value": v, "source": "DEFAULT", "source_detail": "PropYield defaults"}
                         for k, v in asdict(a).items() if v is not None]
     for k in CONFIDENCE_INPUTS:
         val = getattr(r, k, None) if hasattr(r, k) else getattr(p, k, None)

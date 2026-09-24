@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Owned Properties · PropYield</title>
+<link rel="icon" type="image/png" href="/public/propyield_icon.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --navy: #223149; --navy-deep: #142235; --navy-mid: #2d405b;
+    --navy-light: #3b526f; --green: #2d9b58; --green-light: #4bc477;
+    --gold: #d8a83d; --gold-light: #f0c45b; --text: #f1f5f9;
+    --muted: #b0bfd0; --border: #405671; --red: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--navy-deep); color: var(--text); font-family: 'Inter', system-ui, sans-serif; }
+  .card { background: var(--navy); border: 1px solid var(--border); }
+  .muted { color: var(--muted); }
+  input, select, textarea { background: var(--navy-mid); border: 1px solid var(--border); color: var(--text); border-radius: .5rem; padding: .45rem .6rem; font-size: 14px !important; line-height: 1.3; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--green); }
+  .btn { background: var(--navy-mid); color: var(--text); border-radius: .5rem; padding: .45rem .8rem; font-size: .8rem; font-weight: 600; }
+  .btn:hover { background: var(--navy-light); }
+  .btn-primary { background: var(--green); color: #fff; }
+  .btn-primary:hover { background: var(--green-light); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .chip { display: inline-block; font-size: .68rem; font-weight: 600; padding: .1rem .45rem; border-radius: 9999px; background: var(--navy-mid); color: var(--muted); margin: 1px; white-space: nowrap; }
+  .chip-gold { color: var(--gold-light); } .chip-red { color: #fca5a5; } .chip-green { color: #86efac; }
+  .exit-badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: .12rem .55rem; border-radius: 9999px; background: var(--navy-mid); color: var(--text); white-space: nowrap; }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  table.tbl th { text-align: left; color: var(--muted); font-weight: 600; padding: .45rem .5rem; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--navy); position: sticky; top: 0; }
+  table.tbl td { padding: .45rem .5rem; border-bottom: 1px solid rgba(64,86,113,.5); vertical-align: top; }
+  table.tbl tr.clickable:hover td { background: rgba(255,255,255,.03); cursor: pointer; }
+  table.tbl td.num, table.tbl th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sticky-col { position: sticky; left: 0; background: var(--navy); z-index: 1; }
+  .rec-col { outline: 1px solid var(--gold-light); outline-offset: -1px; }
+  .dq { opacity: .45; }
+  .prose-report h1,.prose-report h2,.prose-report h3 { color: var(--gold-light); font-weight: 600; margin: 1rem 0 .4rem; }
+  .prose-report p { margin-bottom: .7rem; line-height: 1.65; color: #cbd5e1; }
+  .prose-report ul,.prose-report ol { margin: .4rem 0 .7rem 1.2rem; list-style: disc; color: #cbd5e1; }
+  .prose-report strong { color: var(--text); }
+  .drop { border: 2px dashed var(--border); }
+  .drop.over { border-color: var(--green); background: rgba(45,155,88,.06); }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  [x-cloak] { display: none !important; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(28rem, 100vw); z-index: 70; overflow-y: auto; }
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60; }
+  label.f { display: block; font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
+  .help { font-size: .68rem; color: var(--muted); margin-top: .15rem; }
+</style>
+</head>
+<body x-data="portfolio()" x-init="init()">
+<div class="sr-only" aria-live="polite" x-text="liveMessage"></div>
+
+<header class="card border-x-0 border-t-0 px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+  <div class="flex items-center gap-3 min-w-0">
+    <a :href="'/'+slug" class="btn" aria-label="Back to analyzer">← Analyzer</a>
+    <div class="min-w-0">
+      <p class="font-semibold truncate">Owned properties</p>
+      <p class="text-xs muted truncate" x-text="tenantName"></p>
+    </div>
+  </div>
+  <div class="flex items-center gap-2 text-xs">
+    <span class="chip" x-show="me" x-text="isSuper ? 'Unlimited tokens' : ('Balance ' + (me ? me.token_balance : 0) + ' tokens')"></span>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+  <div x-show="error" x-cloak class="rounded-lg px-4 py-3 text-sm" style="background:rgba(239,68,68,.1);color:var(--red)" x-text="error"></div>
+
+  <!-- ─────────────── HOME: upload + single + batch list ─────────────── -->
+  <template x-if="view==='home'">
+    <div class="space-y-6">
+      <div class="flex gap-2">
+        <button class="btn" :class="homeTab==='upload'&&'btn-primary'" @click="homeTab='upload'">Upload inventory</button>
+        <button class="btn" :class="homeTab==='single'&&'btn-primary'" @click="homeTab='single'">Single property</button>
+      </div>
+
+      <section x-show="homeTab==='upload'" class="card rounded-xl p-5 space-y-4">
+        <div>
+          <h2 class="font-semibold">Upload your inventory export</h2>
+          <p class="text-sm muted">Get a recommended exit for every property: sell as-is, rehab &amp; sell, rehab &amp; rent, or land contract. CSV or Excel, up to 500 rows and 2 MB.</p>
+        </div>
+        <button type="button" class="drop w-full rounded-xl p-8 text-center" :class="dragOver&&'over'"
+          @click="$refs.inv.click()" @dragover.prevent="dragOver=true" @dragleave="dragOver=false"
+          @drop.prevent="dragOver=false; pickInventory($event.dataTransfer.files[0])" aria-label="Choose an inventory file">
+          <p class="font-medium" x-text="invFile ? invFile.name : 'Drop the inventory CSV or Excel file here, or click to choose'"></p>
+          <p class="text-xs muted mt-1">Required columns: Building Name, Building City, Status, Marketing: Comps, Rehab: Rehab Quote Amount, property tax columns</p>
+        </button>
+        <input x-ref="inv" type="file" class="hidden" accept=".csv,.xlsx,.xls" @change="pickInventory($event.target.files[0]); $event.target.value=''">
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+          <button class="btn" @click="$refs.loans.click()">+ Loans file (optional)</button>
+          <input x-ref="loans" type="file" class="hidden" accept=".csv,.xlsx,.xls" @change="pickLoans($event.target.files[0]); $event.target.value=''">
+          <span class="muted text-xs" x-text="loansFile ? loansFile.name + ' · matched by address' : 'Columns: Building Name, Building City, Loan Payoff, Loan Rate, Loan P&I'"></span>
+          <button x-show="loansFile" class="text-xs muted underline" @click="loansFile=null">remove</button>
+        </div>
+        <div x-show="uploadError" class="text-sm" style="color:var(--red)">
+          <p x-text="uploadError"></p>
+          <p x-show="uploadMissing.length" class="text-xs mt-1">Missing columns: <span x-text="uploadMissing.join(', ')"></span></p>
+        </div>
+        <button class="btn btn-primary" :disabled="!invFile||uploading" @click="upload()" x-text="uploading ? 'Reading file…' : 'Preview properties (free)'"></button>
+      </section>
+
+      <!-- Single property form (N-design D8/D9) -->
+      <section x-show="homeTab==='single'" class="card rounded-xl p-5 space-y-5">
+        <div>
+          <h2 class="font-semibold">Analyze one owned property</h2>
+          <p class="text-sm muted">Blank fields are estimated from market data and lower the confidence rating.</p>
+        </div>
+        <fieldset class="grid sm:grid-cols-4 gap-3">
+          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Property</legend>
+          <div class="sm:col-span-2"><label class="f">Address *</label><input class="w-full" x-model="single.address" placeholder="12345 Main St"></div>
+          <div><label class="f">City *</label><input class="w-full" x-model="single.city"></div>
+          <div><label class="f">State *</label><input class="w-full" x-model="single.state" maxlength="2"></div>
+          <div><label class="f">Portfolio</label><input class="w-full" x-model="single.portfolio"></div>
+          <div><label class="f">Beds</label><input class="w-full" type="number" x-model="single.beds"></div>
+          <div><label class="f">Baths</label><input class="w-full" type="number" x-model="single.baths"></div>
+          <div><label class="f">Sq ft</label><input class="w-full" type="number" x-model="single.sqft"></div>
+          <div><label class="f">Year built</label><input class="w-full" type="number" x-model="single.year_built"></div>
+        </fieldset>
+        <fieldset class="grid sm:grid-cols-4 gap-3">
+          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Values &amp; carrying</legend>
+          <div><label class="f">Comps / ARV</label><input class="w-full" type="number" x-model="single.arv"><p class="help">Blank → estimated from comps</p></div>
+          <div><label class="f">Rehab quote</label><input class="w-full" type="number" x-model="single.rehab_quote"><p class="help">Blank → estimated, flagged</p></div>
+          <div><label class="f">Annual property tax</label><input class="w-full" type="number" x-model="single.annual_tax"></div>
+          <div><label class="f">Annual insurance</label><input class="w-full" type="number" x-model="single.annual_insurance"><p class="help">Blank → $1,200 default</p></div>
+        </fieldset>
+        <fieldset class="grid sm:grid-cols-4 gap-3">
+          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Loan, investor &amp; basis</legend>
+          <div><label class="f">Loan payoff (release amount)</label><input class="w-full" type="number" x-model="single.loan_payoff"></div>
+          <div><label class="f">Interest rate %</label><input class="w-full" type="number" step="0.01" x-model="single.loan_rate"></div>
+          <div><label class="f">Monthly P&amp;I</label><input class="w-full" type="number" x-model="single.loan_pi"></div>
+          <div></div>
+          <div><label class="f">Investor payback</label><input class="w-full" type="number" x-model="single.investor_payback"><p class="help">Fixed amount owed to investors at sale or when a land contract is paid off or sold</p></div>
+          <div><label class="f">Cost basis</label><input class="w-full" type="number" x-model="single.cost_basis"><p class="help">Purchase + improvements + carrying costs to date</p></div>
+        </fieldset>
+        <div><label class="f">Notes</label><textarea class="w-full" rows="3" x-model="single.notes" placeholder="Condition, forfeiture history, mechanical issues…"></textarea></div>
+        <div x-show="singleError" class="text-sm" style="color:var(--red)" x-text="singleError"></div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button class="btn btn-primary" :disabled="singleBusy||!single.address||!single.city||!canAfford(1)" @click="submitSingle()"
+            x-text="singleBusy ? 'Starting…' : ('Analyze · ' + cost + ' tokens' + (isSuper ? '' : ' · Balance ' + (me?me.token_balance:0)))"></button>
+          <button class="text-xs muted underline" @click="clearSingle()">Clear form</button>
+          <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">You need <span x-text="cost"></span> tokens. Ask your admin to add tokens.</span>
+        </div>
+      </section>
+
+      <section class="card rounded-xl overflow-hidden">
+        <div class="px-5 py-3 flex items-center justify-between border-b" style="border-color:var(--border)">
+          <h2 class="font-semibold">Batches</h2>
+          <button class="text-xs muted" @click="loadBatches()">Refresh</button>
+        </div>
+        <p x-show="!batches.length" class="p-5 text-sm muted">Upload your inventory export to get a recommended exit for every property.</p>
+        <div x-show="batches.length" class="overflow-x-auto">
+          <table class="tbl">
+            <thead><tr><th scope="col">File</th><th scope="col">Uploaded</th><th scope="col">Run by</th><th scope="col">Status</th><th scope="col" class="num">Properties</th><th scope="col" class="num">Tokens spent</th></tr></thead>
+            <tbody>
+              <template x-for="b in batches" :key="b.id">
+                <tr class="clickable" @click="openBatch(b.id)">
+                  <td><span x-text="b.file_name"></span> <span x-show="b.kind==='single'" class="chip">Single</span></td>
+                  <td x-text="fmtDate(b.created_at)"></td>
+                  <td x-text="b.run_by||'—'"></td>
+                  <td><span class="chip" :class="statusChip(b.status)" x-text="b.status==='Paused' ? ('Paused ' + b.done + '/' + b.properties) : b.status"></span></td>
+                  <td class="num" x-text="b.properties"></td>
+                  <td class="num" x-text="b.tokens_spent"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </template>
+
+  <!-- ─────────────── BATCH ─────────────── -->
+  <template x-if="view==='batch' && batch">
+    <div class="space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <button class="text-xs muted underline" @click="goHome()">← All batches</button>
+          <h1 class="text-lg font-semibold mt-1"><span x-text="batch.kind==='single' ? 'Single: ' : 'Batch: '"></span><span x-text="batch.file_name"></span></h1>
+          <p class="text-xs muted" x-text="fmtDate(batch.created_at) + ' · ' + batchStatus()"></p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn" @click="showAssumptions=!showAssumptions">Edit assumptions</button>
+          <button class="btn" x-show="doneRows().length" @click="recalculate()" :disabled="recalcBusy" x-text="recalcBusy?'Recalculating…':'Recalculate · free'"></button>
+          <button class="btn" x-show="doneRows().length" @click="exportExcel()">Export Excel</button>
+        </div>
+      </div>
+
+      <div x-show="batch.duplicate_of" class="rounded-lg px-4 py-3 text-sm" style="background:rgba(216,168,61,.1);color:var(--gold-light)">
+        These properties were analyzed on <span x-text="batch.duplicate_of&&fmtDate(batch.duplicate_of.created_at)"></span>. Running again charges again.
+        <button class="underline" @click="openBatch(batch.duplicate_of.batch_id)">View that batch</button>
+      </div>
+      <div x-show="unmatchedLoans.length" class="rounded-lg px-4 py-3 text-sm" style="background:rgba(216,168,61,.1);color:var(--gold-light)">
+        <span x-text="unmatchedLoans.length"></span> loan rows didn't match a property:
+        <span x-text="unmatchedLoans.map(u=>u.address_line).join(', ')"></span>
+      </div>
+      <div x-show="isPaused()" class="rounded-lg px-4 py-3 text-sm flex items-center justify-between gap-3" style="background:var(--navy-mid)">
+        <span>Paused at <span x-text="doneRows().length"></span> of <span x-text="countable().length"></span> when the tab closed.</span>
+        <button class="btn btn-primary" @click="startQueue()" :disabled="!canAfford(1)">Resume</button>
+      </div>
+
+      <!-- Assumptions (D12) -->
+      <section class="card rounded-xl p-4 space-y-3">
+        <p class="text-sm">
+          <span class="muted">Assumptions:</span>
+          <span x-text="assumptionLine()"></span>
+          <button class="underline text-xs muted ml-1" @click="showAssumptions=!showAssumptions" x-text="showAssumptions?'Close':'Edit'"></button>
+        </p>
+        <div x-show="showAssumptions" x-cloak class="space-y-4">
+          <template x-for="group in assumptionGroups" :key="group.title">
+            <fieldset>
+              <legend class="text-xs font-semibold mb-2" style="color:var(--gold-light)" x-text="group.title"></legend>
+              <p x-show="group.help" class="help mb-2" x-text="group.help"></p>
+              <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                <template x-for="f in group.fields" :key="f.key">
+                  <div>
+                    <label class="f" :style="isChanged(f.key)&&'color:var(--text);font-weight:700'" x-text="f.label"></label>
+                    <template x-if="f.key==='owner_goal'">
+                      <select class="w-full" x-model="assumptionDraft.owner_goal">
+                        <option value="">None</option>
+                        <option value="maximize_cash_now">Cash now</option>
+                        <option value="maximize_total_return">Total return</option>
+                        <option value="monthly_income">Monthly income</option>
+                        <option value="minimize_effort">Least effort</option>
+                      </select>
+                    </template>
+                    <template x-if="f.key==='lc_servicer'"><input class="w-full" x-model="assumptionDraft.lc_servicer" placeholder="e.g. SGMS"></template>
+                    <template x-if="f.key!=='owner_goal'&&f.key!=='lc_servicer'"><input class="w-full" type="number" step="any" x-model.number="assumptionDraft[f.key]"></template>
+                  </div>
+                </template>
+              </div>
+            </fieldset>
+          </template>
+          <div x-show="assumptionError" class="text-sm" style="color:var(--red)" x-text="assumptionError"></div>
+          <div class="flex gap-2">
+            <button class="btn btn-primary" @click="saveAssumptions()" x-text="doneRows().length ? 'Save & recalculate · free' : 'Save'"></button>
+            <button class="btn" @click="resetAssumptions()">Reset to defaults</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Loan statements (N3) -->
+      <section class="card rounded-xl p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="font-semibold text-sm">Loan statements <span class="muted font-normal" x-show="batch.statements.length" x-text="'· ' + confirmedStatements() + ' of ' + batch.statements.length + ' confirmed'"></span></h2>
+            <p class="help">PDF, JPG or PNG up to 4 MB each. Files are deleted after you confirm them, or within 24 hours.</p>
+          </div>
+          <button class="btn" @click="$refs.stmts.click()" :disabled="stmtBusy" x-text="stmtBusy ? stmtProgress : '+ Add statements'"></button>
+          <input x-ref="stmts" type="file" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png" @change="uploadStatements($event.target.files); $event.target.value=''">
+        </div>
+        <div x-show="batch.statements.length" class="overflow-x-auto">
+          <table class="tbl">
+            <caption class="sr-only">Loan statements</caption>
+            <thead><tr><th scope="col">File</th><th scope="col">Property</th><th scope="col">Match</th><th scope="col">Payoff</th><th scope="col">Rate %</th><th scope="col">P&amp;I</th><th scope="col">Date</th><th scope="col">Spreadsheet</th><th scope="col">Status</th><th></th></tr></thead>
+            <tbody>
+              <template x-for="st in batch.statements" :key="st.id">
+                <tr>
+                  <td class="max-w-[10rem] truncate" :title="st.file_name">
+                    <button x-show="st.has_file" class="underline" @click="viewStatement(st)" x-text="st.file_name"></button>
+                    <span x-show="!st.has_file" x-text="st.file_name"></span>
+                    <p x-show="st.extracted&&st.extracted.snippets&&st.extracted.snippets.payoff_amount" class="help truncate" x-text="'p.' + ((st.extracted&&st.extracted.page)||'?') + ': “' + ((st.extracted&&st.extracted.snippets&&st.extracted.snippets.payoff_amount)||'') + '”'"></p>
+                  </td>
+                  <td>
+                    <template x-if="st.row_id && st.match_tier!=='multi'"><span x-text="rowAddress(st.row_id)"></span></template>
+                    <template x-if="!st.confirmed && st.status==='read' && (!st.row_id || st.match_tier==='likely')">
+                      <select class="w-40 mt-1" @change="assignStatement(st, $event.target.value)">
+                        <option value="">Assign to…</option>
+                        <template x-for="r in batch.rows" :key="r.id"><option :value="r.id" :selected="r.id===st.row_id" x-text="r.inputs.address_line + ', ' + (r.inputs.city||'')"></option></template>
+                      </select>
+                    </template>
+                  </td>
+                  <td>
+                    <span x-show="st.match_tier==='exact'" class="chip chip-green">Exact</span>
+                    <span x-show="st.match_tier==='likely'" class="chip chip-gold">Check match</span>
+                    <span x-show="st.match_tier==='manual'" class="chip">Manual</span>
+                    <span x-show="st.match_tier==='multi'" class="chip chip-gold" x-text="'Covers ' + st.covers + ' properties'"></span>
+                    <span x-show="st.match_tier==='none'" class="chip chip-red">Unmatched</span>
+                  </td>
+                  <template x-if="st.status==='read'">
+                    <td><input class="w-28" type="number" x-model.number="stmtEdit(st).payoff" :placeholder="'Not found · enter'"></td>
+                  </template>
+                  <template x-if="st.status==='read'"><td><input class="w-20" type="number" step="0.01" x-model.number="stmtEdit(st).rate"></td></template>
+                  <template x-if="st.status==='read'"><td><input class="w-24" type="number" x-model.number="stmtEdit(st).pi"></td></template>
+                  <template x-if="st.status!=='read'">
+                    <td class="num" x-text="st.confirmed_values ? money(st.confirmed_values.payoff) : '—'"></td>
+                  </template>
+                  <template x-if="st.status!=='read'"><td class="num" x-text="st.confirmed_values&&st.confirmed_values.rate!=null ? st.confirmed_values.rate + '%' : '—'"></td></template>
+                  <template x-if="st.status!=='read'"><td class="num" x-text="st.confirmed_values ? money(st.confirmed_values.pi) : '—'"></td></template>
+                  <td>
+                    <span x-text="st.statement_date||'—'"></span>
+                    <span x-show="st.stale" class="chip chip-gold" x-text="'Stale (' + st.stale_days + ' days)'"></span>
+                  </td>
+                  <td class="num">
+                    <span x-text="st.row_id ? money(rowLoan(st.row_id)) : '—'"></span>
+                    <span x-show="st.status==='read' && differs(st)" class="chip chip-gold">Differs from spreadsheet</span>
+                  </td>
+                  <td><span class="chip" :class="stmtChip(st)" x-text="stmtStatusLabel(st)"></span></td>
+                  <td class="whitespace-nowrap">
+                    <button x-show="st.status==='read' && st.row_id && st.match_tier!=='multi'" class="btn btn-primary"
+                      :disabled="!stmtReady(st)" @click="confirmStatement(st)" x-text="st.stale ? 'Confirm anyway' : 'Confirm'"></button>
+                    <button class="text-xs muted underline ml-1" @click="removeStatement(st)">Remove</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Totals strip (D4) -->
+      <section x-show="doneRows().length" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="card rounded-xl p-3"><p class="text-xs muted">Analyzed</p><p class="text-lg font-semibold" x-text="doneRows().length + ' of ' + countable().length"></p></div>
+        <div class="card rounded-xl p-3"><p class="text-xs muted">Carry / month</p><p class="text-lg font-semibold" x-text="money(totalCarry())"></p></div>
+        <div class="card rounded-xl p-3"><p class="text-xs muted">At stake vs. sell as-is</p><p class="text-lg font-semibold" x-text="money(totalStake())"></p></div>
+        <div class="card rounded-xl p-3"><p class="text-xs muted mb-1">Recommended exits</p>
+          <template x-for="[k,n] in exitCounts()" :key="k"><span class="exit-badge mr-1 mb-1" x-text="label(k) + ' ' + n"></span></template>
+        </div>
+      </section>
+
+      <!-- Progress meter (D8) -->
+      <section x-show="queueRunning || failedRows().length || waitingTokens" class="card rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <p>
+          <span x-text="doneRows().length"></span> done ·
+          <span x-text="failedRows().length"></span> failed ·
+          <span x-text="queuedRows().length"></span> left ·
+          <span x-text="tokensSpent()"></span> tokens spent
+          <span x-show="queueRunning && eta()" x-text="' · ~' + eta() + ' min left'"></span>
+        </p>
+        <p x-show="queueRunning" class="text-xs muted">Keep this tab open. You can use other tabs; closing this one pauses the batch.</p>
+        <p x-show="waitingTokens" class="text-xs" style="color:var(--gold-light)">Waiting for tokens. Top up to continue.</p>
+        <div class="flex gap-2">
+          <button x-show="queueRunning" class="btn" @click="stopQueue()">Pause</button>
+          <button x-show="!queueRunning && failedRows().length" class="btn" :disabled="!canAfford(failedRows().length)" @click="retryFailed()"
+            x-text="'Retry failed rows (' + failedRows().length + ' × ' + cost + ' tokens)'"></button>
+        </div>
+      </section>
+
+      <!-- Preview / summary table -->
+      <section class="card rounded-xl overflow-hidden">
+        <div class="px-4 py-3 flex flex-wrap items-center gap-3 border-b" style="border-color:var(--border)">
+          <h2 class="font-semibold text-sm mr-auto" x-text="doneRows().length ? 'Properties' : 'Preview'"></h2>
+          <p x-show="flagSummary()" class="text-xs muted w-full sm:w-auto" x-text="flagSummary()"></p>
+          <select x-model="filterExit" aria-label="Filter by exit"><option value="">All exits</option><template x-for="k in STRATS" :key="k"><option :value="k" x-text="label(k)"></option></template></select>
+          <select x-model="filterPortfolio" aria-label="Filter by portfolio"><option value="">All portfolios</option><template x-for="p in portfolios()" :key="p"><option :value="p" x-text="p"></option></template></select>
+          <select x-model="filterFlag" aria-label="Filter by flag"><option value="">All flags</option><template x-for="f in allFlags()" :key="f"><option :value="f" x-text="f"></option></template></select>
+        </div>
+        <div class="overflow-x-auto max-h-[70vh]">
+          <table class="tbl">
+            <caption class="sr-only">Properties in this batch</caption>
+            <thead><tr>
+              <th scope="col" class="sticky-col">Address</th>
+              <th scope="col">Portfolio</th>
+              <th scope="col">Status / exit</th>
+              <th scope="col" class="num">$ at stake</th>
+              <th scope="col" class="num">Value today (best)</th>
+              <th scope="col" class="num">Sell as-is</th>
+              <th scope="col" class="num">Comps (ARV)</th>
+              <th scope="col" class="num">Rehab</th>
+              <th scope="col" class="num">Loan</th>
+              <th scope="col" class="num">Carry/mo</th>
+              <th scope="col">Confidence</th>
+              <th scope="col">Flags</th>
+              <th scope="col" x-show="!allDone()">Include</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              <template x-for="r in visibleRows()" :key="r.id">
+                <tr :class="r.analysis&&'clickable'" @click="r.analysis && openReport(r)">
+                  <td class="sticky-col font-medium" x-text="r.inputs.address_line + (r.inputs.city ? ', ' + r.inputs.city : '')"></td>
+                  <td class="muted" x-text="r.inputs.portfolio||'—'"></td>
+                  <td>
+                    <template x-if="r.status==='done'||(r.analysis&&r.status!=='running')">
+                      <span>
+                        <span x-show="!recOf(r).close_call" class="exit-badge" x-text="label(recOf(r).strategy)"></span>
+                        <span x-show="recOf(r).close_call" class="exit-badge" style="color:var(--gold-light)" x-text="'Close call: ' + label(recOf(r).strategy) + ' / ' + label(recOf(r).runner_up)"></span>
+                      </span>
+                    </template>
+                    <template x-if="r.status==='running'"><span class="chip chip-gold"><span class="spin">◌</span> <span x-text="stepLabel(r.step)"></span></span></template>
+                    <template x-if="r.status==='queued'"><span class="chip" x-text="r.error==='Reset after tab closed' ? 'Re-queued' : (waitingTokens&&r.include ? 'Waiting for tokens' : 'Queued')"></span></template>
+                    <template x-if="r.status==='failed_refunded'"><span><span class="chip chip-red">Failed · refunded</span><p class="help" style="color:#fca5a5" x-text="r.error"></p></span></template>
+                    <template x-if="r.status==='failed_charged'"><span><span class="chip chip-red">Failed · not refunded</span><p class="help">Analysis had started</p></span></template>
+                    <template x-if="r.status==='skipped_pending'"><span class="chip">Pending sale · not analyzed, not charged</span></template>
+                    <template x-if="r.status==='excluded'"><span class="chip">Excluded</span></template>
+                  </td>
+                  <td class="num" x-text="r.analysis ? money(r.dollars_at_stake) : ''"></td>
+                  <td class="num" x-text="r.analysis ? money(bestValue(r)) : ''"></td>
+                  <td class="num" x-text="r.analysis ? money(scen(r,'sell_as_is').risk_adjusted_score) : ''"></td>
+                  <td class="num" x-text="money(r.overrides.arv ?? r.inputs.arv)"></td>
+                  <td class="num" x-text="(r.overrides.rehab_budget ?? r.inputs.rehab_quote) != null ? money(r.overrides.rehab_budget ?? r.inputs.rehab_quote) : 'Unknown'"></td>
+                  <td class="num" x-text="loanOf(r) ? money(loanOf(r)) : 'None ($0)'"></td>
+                  <td class="num" x-text="r.analysis ? money(carryOf(r)) : ''"></td>
+                  <td><span x-show="r.analysis" :class="confClass(r)" class="text-xs font-semibold" x-text="r.analysis&&r.analysis.property.confidence"></span></td>
+                  <td class="max-w-[16rem]"><template x-for="f in r.flags" :key="f"><span class="chip" :class="flagChip(f)" x-text="f"></span></template></td>
+                  <td x-show="!allDone()" @click.stop>
+                    <input type="checkbox" :checked="r.include" :disabled="r.status==='done'||r.status==='running'||queueRunning" @change="toggleInclude(r, $event.target.checked)" :aria-label="'Include ' + r.inputs.address_line">
+                  </td>
+                  <td @click.stop><button class="text-xs underline muted" :disabled="r.status==='running'" @click="openDrawer(r)">Edit</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Sticky cost footer (D7) -->
+      <div x-show="!queueRunning && queuedRows().length" class="card rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 sticky bottom-3">
+        <p class="text-sm">
+          <span x-text="queuedRows().length"></span> properties × <span x-text="cost"></span> = <strong x-text="queuedRows().length*cost + ' tokens'"></strong>
+          <span class="muted" x-text="'($' + (queuedRows().length*cost*5).toLocaleString() + ')'"></span>
+          <span class="muted" x-show="!isSuper" x-text="' · Balance ' + (me?me.token_balance:0)"></span>
+          <span x-show="batch.unconfirmed_statements" class="chip chip-gold" x-text="batch.unconfirmed_statements + ' statements unconfirmed'"></span>
+        </p>
+        <div class="flex items-center gap-2">
+          <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">Not enough tokens. Ask your admin to add tokens.</span>
+          <button class="btn btn-primary" :disabled="!canAfford(1)" @click="confirmStart()" x-text="'Start · ' + queuedRows().length*cost + ' tokens'"></button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ─────────────── REPORT (D6) ─────────────── -->
+  <template x-if="view==='report' && report">
+    <div class="space-y-5">
+      <div class="card rounded-xl px-4 py-2 flex items-center justify-between text-sm sticky top-16 z-40">
+        <button class="btn" :disabled="reportIndex()<=0" @click="stepReport(-1)">← Prev</button>
+        <span class="muted" x-text="(reportIndex()+1) + ' of ' + reportList().length"></span>
+        <div class="flex gap-2">
+          <button class="btn" :disabled="reportIndex()>=reportList().length-1" @click="stepReport(1)">Next →</button>
+          <button class="btn" @click="view='batch'">Back to summary</button>
+        </div>
+      </div>
+
+      <!-- memo header (D12) -->
+      <section class="card rounded-xl p-5 space-y-2">
+        <p class="text-xs muted" x-text="'Internal memo · ' + tenantName + ' · ' + fmtDate(new Date().toISOString())"></p>
+        <h1 class="text-xl font-semibold" x-text="report.inputs.address_line + ', ' + (report.inputs.city||'') + ' ' + (report.inputs.state||'MI')"></h1>
+        <p class="text-sm">
+          <span class="muted">Confidence:</span> <span :class="confClass(report)" class="font-semibold" x-text="report.analysis.property.confidence"></span>
+          <template x-for="f in report.flags" :key="f"><span class="chip ml-1" :class="flagChip(f)" x-text="f"></span></template>
+        </p>
+        <div class="rounded-lg px-4 py-3 mt-2" style="background:var(--navy-mid)">
+          <p class="font-semibold" x-html="banner(report)"></p>
+        </div>
+      </section>
+
+      <!-- comparison table -->
+      <section class="card rounded-xl overflow-x-auto">
+        <table class="tbl">
+          <caption class="sr-only">Exit comparison</caption>
+          <thead><tr>
+            <th scope="col" class="sticky-col">Metric</th>
+            <template x-for="k in STRATS" :key="k">
+              <th scope="col" class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']">
+                <span x-text="label(k)"></span>
+                <p x-show="k==='rehab_land_contract' && report.analysis.assumptions.find(a=>a.name==='lc_servicer'&&a.value)" class="help" x-text="'Serviced by ' + ((report.analysis.assumptions.find(a=>a.name==='lc_servicer')||{}).value||'')"></p>
+              </th>
+            </template>
+          </tr></thead>
+          <tbody>
+            <template x-for="m in METRICS" :key="m.key">
+              <tr>
+                <th scope="row" class="sticky-col" :style="m.bold&&'color:var(--text)'" x-text="m.label"></th>
+                <template x-for="k in STRATS" :key="k">
+                  <td class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']" :style="m.bold&&'font-weight:700'" x-text="fmtMetric(m, scen(report,k))"></td>
+                </template>
+              </tr>
+            </template>
+            <tr>
+              <th scope="row" class="sticky-col">Ruled out</th>
+              <template x-for="k in STRATS" :key="k"><td class="text-xs" style="color:#fca5a5" x-text="scen(report,k).disqualifier||''"></td></template>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="grid lg:grid-cols-2 gap-5">
+        <div class="card rounded-xl p-5">
+          <h2 class="font-semibold mb-2">Why this wins</h2>
+          <p x-show="report.rationale_stale" class="text-xs mb-2" style="color:var(--gold-light)">Written under previous assumptions. The numbers above are current.</p>
+          <div class="prose-report text-sm" x-html="md(report.rationale || '')"></div>
+        </div>
+        <div class="card rounded-xl p-5">
+          <h2 class="font-semibold mb-2">What would change the answer</h2>
+          <p x-show="!recOf(report).break_even_triggers.length" class="text-sm muted">No single input within ±50% flips the recommendation.</p>
+          <ul class="text-sm space-y-1 list-disc ml-5">
+            <template x-for="t in recOf(report).break_even_triggers" :key="t.variable + t.direction">
+              <li x-text="'If ' + t.label + ' is ' + t.direction + ' ' + money(t.threshold) + ', ' + label(t.new_winner) + ' wins.'"></li>
+            </template>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card rounded-xl overflow-x-auto">
+        <div class="px-4 pt-4"><h2 class="font-semibold">Stress tests (NPV)</h2><p class="help">Worst result per exit is marked.</p></div>
+        <table class="tbl mt-2">
+          <thead><tr><th scope="col" class="sticky-col">Scenario</th><template x-for="k in STRATS" :key="k"><th scope="col" class="num" x-text="label(k)"></th></template></tr></thead>
+          <tbody>
+            <template x-for="s in STRESS" :key="s.key">
+              <tr>
+                <th scope="row" class="sticky-col" x-text="s.label"></th>
+                <template x-for="k in STRATS" :key="k">
+                  <td class="num" :style="isWorst(report,k,s.key)&&'color:#fca5a5;font-weight:700'" x-text="money(scen(report,k).stress_tests[s.key]) + (isWorst(report,k,s.key)?' ▼':'')"></td>
+                </template>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card rounded-xl p-5" x-show="report.analysis.flags.length">
+        <h2 class="font-semibold mb-2">Flags</h2>
+        <ul class="text-sm space-y-1">
+          <template x-for="f in report.analysis.flags" :key="f.message">
+            <li><span class="chip" :class="f.severity==='critical'?'chip-red':(f.severity==='warning'?'chip-gold':'')" x-text="f.severity"></span> <span x-text="f.message"></span></li>
+          </template>
+        </ul>
+      </section>
+
+      <section class="card rounded-xl overflow-x-auto">
+        <div class="px-4 pt-4"><h2 class="font-semibold">Property inputs</h2><p class="help">USER = your spreadsheet or edits · DATA = market research · DEFAULT = standard assumption, lowers confidence</p></div>
+        <table class="tbl mt-2">
+          <thead><tr><th scope="col">Input</th><th scope="col" class="num">Value</th><th scope="col">Source</th><th scope="col">Detail</th></tr></thead>
+          <tbody>
+            <template x-for="a in propertyInputs(report)" :key="a.name">
+              <tr><td x-text="a.name.replaceAll('_',' ')"></td><td class="num" x-text="a.value==null?'—':(typeof a.value==='number'?a.value.toLocaleString():a.value)"></td>
+                <td><span class="chip" :class="a.source==='USER'?'chip-green':(a.source==='DATA'?'chip-gold':'')" x-text="a.source"></span></td>
+                <td class="text-xs muted" x-text="a.source_detail||''"></td></tr>
+            </template>
+          </tbody>
+        </table>
+      </section>
+
+      <details class="card rounded-xl p-4">
+        <summary class="font-semibold cursor-pointer">Batch assumptions used</summary>
+        <div class="grid sm:grid-cols-3 gap-x-6 gap-y-1 mt-3 text-xs">
+          <template x-for="a in batchAssumptions(report)" :key="a.name">
+            <div class="flex justify-between gap-2 border-b py-1" style="border-color:rgba(64,86,113,.5)"><span class="muted" x-text="a.name.replaceAll('_',' ')"></span><span x-text="typeof a.value==='number'?a.value.toLocaleString():a.value"></span></div>
+          </template>
+        </div>
+      </details>
+
+      <section class="card rounded-xl p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold">Full write-up</h2>
+          <button x-show="!report.writeup && !writeupBusy" class="btn" @click="runWriteup(report)">Generate full write-up · included</button>
+          <span x-show="writeupBusy" class="text-xs muted"><span class="spin">◌</span> Writing…</span>
+        </div>
+        <p x-show="writeupError" class="text-sm" style="color:var(--red)" x-text="writeupError"></p>
+        <div class="prose-report text-sm" x-html="md(report.writeup || writeupText)"></div>
+      </section>
+
+      <p class="text-xs muted">This analysis is an investment model, not legal or tax advice. Confirm the tax impact with your CPA and land contract terms with a Michigan real estate attorney.</p>
+    </div>
+  </template>
+</main>
+
+<!-- Edit drawer (D5) -->
+<template x-if="drawer">
+  <div>
+    <div class="scrim" @click="drawer=null"></div>
+    <aside class="drawer card p-5 space-y-4" role="dialog" aria-modal="true" aria-label="Edit property inputs" @keydown.escape.window="drawer=null" x-init="$nextTick(()=>$el.querySelector('input')?.focus())">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold" x-text="drawer.row.inputs.address_line"></h2>
+        <button class="btn" @click="drawer=null" aria-label="Close">✕</button>
+      </div>
+      <p class="help">Blank = use the spreadsheet value or market estimate. Changes on finished rows apply with Recalculate (free).</p>
+      <template x-for="f in DRAWER_FIELDS" :key="f.key">
+        <div>
+          <label class="f" x-text="f.label"></label>
+          <input class="w-full" type="number" step="any" x-model="drawer.values[f.key]" :placeholder="drawerPlaceholder(f.key)">
+          <p x-show="f.help" class="help" x-text="f.help"></p>
+        </div>
+      </template>
+      <p x-show="drawer.error" class="text-sm" style="color:var(--red)" x-text="drawer.error"></p>
+      <div class="flex gap-2"><button class="btn btn-primary" @click="saveDrawer()">Save</button><button class="btn" @click="drawer=null">Cancel</button></div>
+    </aside>
+  </div>
+</template>
+
+<!-- Start dialog when statements are unconfirmed (N-design D4) -->
+<template x-if="startDialog">
+  <div>
+    <div class="scrim" @click="startDialog=false"></div>
+    <div class="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div class="card rounded-xl p-5 max-w-md space-y-3" @keydown.escape.window="startDialog=false">
+        <p class="font-semibold" x-text="batch.unconfirmed_statements + ' loan statements are unconfirmed'"></p>
+        <p class="text-sm muted">Unconfirmed statements are not used. Those properties run on the spreadsheet loan value, or $0.</p>
+        <div class="flex gap-2 justify-end">
+          <button class="btn" @click="startDialog=false">Confirm first</button>
+          <button class="btn btn-primary" @click="startDialog=false; startQueue()">Run without them</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+const _slug = location.pathname.split('/').filter(Boolean)[0] || '';
+const LABELS = { sell_as_is: 'Sell as-is', rehab_sell: 'Rehab & sell', rehab_rent: 'Rehab & rent', rehab_land_contract: 'Land contract' };
+const LANES = 2;
+
+function safeCell(v) {
+  // E11: neutralize spreadsheet formulas in exported text
+  if (typeof v !== 'string') return v;
+  return /^[=+\-@\t\r]/.test(v) ? "'" + v : v;
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function portfolio() {
+  return {
+    slug: _slug, token: null, me: null, tenantName: '', error: '', liveMessage: '',
+    view: 'home', homeTab: 'upload', batches: [], batch: null, report: null, unmatchedLoans: [],
+    invFile: null, loansFile: null, dragOver: false, uploading: false, uploadError: '', uploadMissing: [],
+    single: {}, singleBusy: false, singleError: '',
+    showAssumptions: false, assumptionDraft: {}, assumptionError: '', recalcBusy: false,
+    filterExit: '', filterPortfolio: '', filterFlag: '',
+    queueRunning: false, stopRequested: false, waitingTokens: false, rowTimes: [], retrying: false, wakeLock: null,
+    stmtBusy: false, stmtProgress: '', stmtEdits: {},
+    drawer: null, startDialog: false,
+    writeupBusy: false, writeupText: '', writeupError: '',
+    STRATS: ['sell_as_is', 'rehab_sell', 'rehab_rent', 'rehab_land_contract'],
+    METRICS: [
+      { key: 'risk_adjusted_score', label: 'Risk-adjusted value', fmt: 'money', bold: true },
+      { key: 'npv', label: 'NPV', fmt: 'money' },
+      { key: 'net_profit', label: 'Net profit', fmt: 'money' },
+      { key: 'irr', label: 'IRR', fmt: 'pct' },
+      { key: 'equity_multiple', label: 'Equity multiple', fmt: 'x' },
+      { key: 'peak_capital', label: 'Peak capital', fmt: 'money' },
+      { key: 'months_to_liquidity', label: 'Months to liquidity', fmt: 'months' },
+      { key: 'effort', label: 'Effort', fmt: 'text' },
+      { key: 'risk_score', label: 'Risk score (1-10)', fmt: 'num' },
+    ],
+    STRESS: [
+      { key: 'base', label: 'Base case' }, { key: 'rehab_overrun', label: 'Rehab +20%' },
+      { key: 'arv_minus_10', label: 'ARV −10%' }, { key: 'zero_appreciation', label: '0% appreciation' },
+      { key: 'rental_stress', label: 'Rent −10%, vacancy 15%' }, { key: 'lc_default_40', label: 'LC default 40%' },
+      { key: 'combined_downside', label: 'Combined downside' },
+    ],
+    DRAWER_FIELDS: [
+      { key: 'loan_payoff', label: 'Loan payoff (release amount)', help: 'A payoff above $0 needs the rate and P&I' },
+      { key: 'loan_rate_pct', label: 'Loan interest rate %' },
+      { key: 'loan_pi', label: 'Loan monthly P&I' },
+      { key: 'investor_payback', label: 'Investor payback', help: 'Fixed amount owed to investors at sale or when a land contract is paid off or sold' },
+      { key: 'cost_basis', label: 'Cost basis', help: 'Purchase + improvements + carrying costs to date' },
+      { key: 'as_is_value', label: 'Current value (as-is)', help: 'Blank → estimated from similar-condition sales' },
+      { key: 'arv', label: 'After-repair value (ARV)' },
+      { key: 'market_rent', label: 'Market rent / month' },
+      { key: 'rehab_budget', label: 'Rehab budget' },
+      { key: 'annual_tax', label: 'Annual property tax' },
+      { key: 'annual_insurance', label: 'Annual insurance' },
+    ],
+    assumptionGroups: [
+      { title: 'Ranking', help: 'Discount rate: what a dollar a year from now is worth to you today. Higher favors faster exits.',
+        fields: [{ key: 'discount_rate_pct', label: 'Discount rate %' }, { key: 'owner_goal', label: 'Tie-breaker goal' }, { key: 'horizon_months', label: 'Horizon (months)' }] },
+      { title: 'Carrying costs', fields: [{ key: 'insurance_default_annual', label: 'Insurance default $/yr' }, { key: 'utilities_vacant_monthly', label: 'Vacant utilities $/mo' }] },
+      { title: 'Selling', fields: [{ key: 'commission_pct', label: 'Commission %' }, { key: 'closing_pct', label: 'Closing + transfer tax %' }, { key: 'as_is_commission_pct', label: 'As-is commission %' }, { key: 'concessions_pct', label: 'Concessions %' }] },
+      { title: 'Rental', fields: [{ key: 'vacancy_pct', label: 'Vacancy %' }, { key: 'maintenance_pct', label: 'Maintenance %' }, { key: 'capex_pct', label: 'CapEx %' }, { key: 'management_pct', label: 'Management %' }, { key: 'rent_growth_pct', label: 'Rent growth %' }] },
+      { title: 'Land contract', help: 'Default probability: share of land-contract buyers expected to stop paying. On default, payments stop at month 14 and the property is resold as-is.',
+        fields: [{ key: 'lc_price_premium_pct', label: 'Price premium %' }, { key: 'lc_down_pct', label: 'Down payment %' }, { key: 'lc_rate_pct', label: 'Rate %' }, { key: 'lc_amort_years', label: 'Amortization (yrs)' }, { key: 'lc_default_prob_pct', label: 'Default probability %' }, { key: 'lc_servicing_monthly', label: 'Servicing $/mo' }, { key: 'lc_servicer', label: 'Servicer' }] },
+    ],
+    DEFAULTS: null,
+
+    get cost() { return (this.me && this.me.hold_token_cost) || 5; },
+    get isSuper() { return this.me && this.me.role === 'superadmin'; },
+
+    async init() {
+      this.token = localStorage.getItem('re_token');
+      if (!this.token) { location.href = '/' + this.slug; return; }
+      try { this.single = JSON.parse(localStorage.getItem('owned_single_draft') || 'null') || this.blankSingle(); } catch (e) { this.single = this.blankSingle(); }
+      this.$watch('single', v => { try { localStorage.setItem('owned_single_draft', JSON.stringify(v)); } catch (e) {} }, { deep: true });
+      const r = await fetch('/api/me', { headers: this.h() });
+      if (!r.ok) { localStorage.removeItem('re_token'); location.href = '/' + this.slug; return; }
+      this.me = await r.json();
+      try { const t = await fetch('/api/tenant/' + this.slug); if (t.ok) { const tj = await t.json(); this.tenantName = tj.company_name || ''; if (tj.primary_color) document.documentElement.style.setProperty('--green', tj.primary_color); } } catch (e) {}
+      if (!this.me.asset_analysis_enabled) { this.error = "Owned-property exit analysis isn't enabled for your company. Contact your PropYield admin."; return; }
+      await this.loadBatches();
+      const id = new URLSearchParams(location.search).get('batch');
+      if (id) await this.openBatch(Number(id));
+      window.addEventListener('beforeunload', e => { if (this.queueRunning) { e.preventDefault(); e.returnValue = ''; } });
+      window.addEventListener('popstate', () => { const b = new URLSearchParams(location.search).get('batch'); if (!b) { this.view = 'home'; this.batch = null; } });
+    },
+    h(extra) { return { Authorization: 'Bearer ' + this.token, ...(extra || {}) }; },
+    async api(path, opts = {}) {
+      const r = await fetch(path, { ...opts, headers: this.h(opts.json ? { 'Content-Type': 'application/json' } : {}), body: opts.json ? JSON.stringify(opts.json) : opts.body });
+      let data = null; try { data = await r.json(); } catch (e) {}
+      if (!r.ok) { const d = data && data.detail; const err = new Error(typeof d === 'string' ? d : (d && d.message) || ('Request failed (' + r.status + ')')); err.status = r.status; err.detail = d; throw err; }
+      return data;
+    },
+    async refreshMe() { try { this.me = { ...this.me, ...(await this.api('/api/me')) }; } catch (e) {} },
+
+    // ── home ──
+    blankSingle() { return { address: '', city: '', state: 'MI', portfolio: '', beds: '', baths: '', sqft: '', year_built: '', arv: '', rehab_quote: '', annual_tax: '', annual_insurance: '', loan_payoff: '', loan_rate: '', loan_pi: '', investor_payback: '', cost_basis: '', notes: '' }; },
+    clearSingle() { this.single = this.blankSingle(); this.singleError = ''; },
+    async loadBatches() { try { this.batches = await this.api('/api/owned/batches'); } catch (e) { this.error = e.message; } },
+    goHome() { if (this.queueRunning && !confirm('Leaving pauses the batch. Continue?')) return; this.stopQueue(); this.view = 'home'; this.batch = null; history.pushState({}, '', location.pathname); this.loadBatches(); },
+    pickInventory(f) { if (f) { this.invFile = f; this.uploadError = ''; this.uploadMissing = []; } },
+    pickLoans(f) { if (f) this.loansFile = f; },
+    async toCsvBlob(file) {
+      // N2: Excel is converted to CSV in the browser
+      if (/\.(xlsx|xls)$/i.test(file.name)) {
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+        return new File([csv], file.name.replace(/\.(xlsx|xls)$/i, '.csv'), { type: 'text/csv' });
+      }
+      return file;
+    },
+    async upload() {
+      this.uploading = true; this.uploadError = ''; this.uploadMissing = [];
+      try {
+        const fd = new FormData();
+        fd.append('file', await this.toCsvBlob(this.invFile));
+        fd.append('file_name', this.invFile.name);
+        if (this.loansFile) fd.append('loans_file', await this.toCsvBlob(this.loansFile));
+        const b = await this.api('/api/owned/batches', { method: 'POST', body: fd });
+        this.unmatchedLoans = b.unmatched_loans || [];
+        this.invFile = null; this.loansFile = null;
+        this.showBatch(b);
+      } catch (e) {
+        this.uploadError = e.message; this.uploadMissing = (e.detail && e.detail.missing) || [];
+      } finally { this.uploading = false; }
+    },
+    async submitSingle() {
+      this.singleBusy = true; this.singleError = '';
+      const body = {};
+      for (const [k, v] of Object.entries(this.single)) {
+        if (v === '' || v == null) continue;
+        body[k] = ['address', 'city', 'state', 'portfolio', 'notes'].includes(k) ? String(v) : Number(v);
+      }
+      try {
+        const b = await this.api('/api/owned/single', { method: 'POST', json: body });
+        this.showBatch(b);
+        await this.startQueue();
+        const row = this.batch.rows[0];
+        if (row && row.status === 'done') { localStorage.removeItem('owned_single_draft'); this.single = this.blankSingle(); this.openReport(row); }
+        else if (row) { this.singleError = row.error || 'The analysis did not finish.'; }
+      } catch (e) { this.singleError = e.message; }
+      finally { this.singleBusy = false; }
+    },
+
+    // ── batch ──
+    async openBatch(id) {
+      try { this.unmatchedLoans = []; this.showBatch(await this.api('/api/owned/batches/' + id)); } catch (e) { this.error = e.message; }
+    },
+    showBatch(b) {
+      this.batch = b; this.view = 'batch'; this.report = null; this.stmtEdits = {};
+      this.assumptionDraft = { ...b.assumptions };
+      this.DEFAULTS = b.assumption_defaults || null;
+      const url = location.pathname + '?batch=' + b.id;
+      if (location.pathname + location.search !== url) history.pushState({}, '', url);
+    },
+    async reloadBatch() { if (this.batch) { const b = await this.api('/api/owned/batches/' + this.batch.id); const u = this.unmatchedLoans; this.batch = b; this.unmatchedLoans = u; } },
+    batchStatus() {
+      if (this.queueRunning) return 'Running';
+      if (this.allDone()) return this.failedRows().length ? this.failedRows().length + ' failed' : 'Complete';
+      return this.doneRows().length ? 'Paused' : 'Ready';
+    },
+    isPaused() { return !this.queueRunning && this.doneRows().length > 0 && this.queuedRows().length > 0; },
+    countable() { return this.batch.rows.filter(r => r.include); },
+    doneRows() { return this.batch ? this.batch.rows.filter(r => r.status === 'done') : []; },
+    failedRows() { return this.batch ? this.batch.rows.filter(r => r.status.startsWith('failed')) : []; },
+    queuedRows() { return this.batch ? this.batch.rows.filter(r => r.include && r.status === 'queued') : []; },
+    allDone() { return this.batch.rows.every(r => ['done', 'failed_refunded', 'failed_charged', 'skipped_pending', 'excluded'].includes(r.status)); },
+    tokensSpent() { return this.batch.rows.reduce((s, r) => s + (r.debited || 0), 0); },
+    canAfford(n) { return this.isSuper || (this.me && this.me.token_balance >= n * this.cost); },
+    eta() {
+      if (!this.rowTimes.length) return 0;
+      const t = [...this.rowTimes].sort((a, b) => a - b)[Math.floor(this.rowTimes.length / 2)];
+      return Math.max(1, Math.round(this.queuedRows().length * t / LANES / 60000));
+    },
+
+    // rows / analysis helpers
+    recOf(r) { return (r.analysis && r.analysis.recommendation) || { break_even_triggers: [] }; },
+    scen(r, k) { return ((r.analysis && r.analysis.scenarios) || []).find(s => s.strategy === k) || { stress_tests: {} }; },
+    bestValue(r) { return this.scen(r, this.recOf(r).strategy).risk_adjusted_score; },
+    carryOf(r) { const f = this.scen(r, 'sell_as_is').monthly_cash_flows || []; return f.length > 1 && f[1] < 0 ? -f[1] : 0; },
+    loanOf(r) {
+      const st = (this.batch.statements || []).find(s => s.row_id === r.id && s.confirmed);
+      if (st && st.confirmed_values) return st.confirmed_values.payoff;
+      return r.overrides.loan_payoff ?? r.inputs.loan_payoff ?? 0;
+    },
+    label(k) { return LABELS[k] || k || ''; },
+    stepLabel(s) { return { estimating: 'Estimating value', computing: 'Computing', writing: 'Writing' }[s] || 'Starting'; },
+    confClass(r) { const c = r.analysis && r.analysis.property.confidence; return c === 'High' ? 'text-green-400' : (c === 'Medium' ? 'text-yellow-300' : 'text-red-400'); },
+    flagChip(f) { return ['LC forfeiture history', 'Pending sale'].includes(f) ? 'chip-gold' : (['Estimated ARV', 'Unknown rehab', 'Stale value'].includes(f) ? 'chip-gold' : ''); },
+    statusChip(s) { return s === 'Complete' ? 'chip-green' : (s.includes('failed') ? 'chip-red' : (s === 'Running' || s === 'Paused' ? 'chip-gold' : '')); },
+    portfolios() { return [...new Set(this.batch.rows.map(r => r.inputs.portfolio).filter(Boolean))].sort(); },
+    allFlags() { return [...new Set(this.batch.rows.flatMap(r => r.flags))].sort(); },
+    flagSummary() {
+      const counts = {};
+      this.batch.rows.forEach(r => r.flags.forEach(f => counts[f] = (counts[f] || 0) + 1));
+      return Object.entries(counts).map(([f, n]) => n + ' ' + f.toLowerCase()).join(' · ');
+    },
+    visibleRows() {
+      let rows = this.batch.rows.filter(r =>
+        (!this.filterExit || this.recOf(r).strategy === this.filterExit) &&
+        (!this.filterPortfolio || r.inputs.portfolio === this.filterPortfolio) &&
+        (!this.filterFlag || r.flags.includes(this.filterFlag)));
+      // Ranked (analyzed) rows first by $ at stake desc; then everything not in the ranking.
+      return rows.sort((a, b) => {
+        const ax = a.analysis ? 1 : 0, bx = b.analysis ? 1 : 0;
+        if (ax !== bx) return bx - ax;
+        if (ax) return (b.dollars_at_stake || 0) - (a.dollars_at_stake || 0);
+        return a.row_number - b.row_number;
+      });
+    },
+    reportList() { return this.visibleRows().filter(r => r.analysis); },
+    totalCarry() { return this.doneRows().reduce((s, r) => s + this.carryOf(r), 0); },
+    totalStake() { return this.doneRows().reduce((s, r) => s + (r.dollars_at_stake || 0), 0); },
+    exitCounts() { const c = {}; this.doneRows().forEach(r => { const k = this.recOf(r).strategy; c[k] = (c[k] || 0) + 1; }); return Object.entries(c); },
+
+    // formatting (D14)
+    money(v) { if (v == null || isNaN(v)) return '—'; const n = Math.round(v / 100) * 100; return (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString(); },
+    fmtDate(s) { if (!s) return ''; const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z'); return d.toLocaleDateString(); },
+    fmtMetric(m, s) {
+      const v = s[m.key];
+      if (m.key === 'irr' && v == null) return s.irr_reason || 'n/a';
+      if (v == null) return '—';
+      if (m.fmt === 'money') return this.money(v);
+      if (m.fmt === 'pct') return v.toFixed(1) + '%';
+      if (m.fmt === 'x') return v.toFixed(2) + 'x';
+      if (m.fmt === 'months') return v + (s.liquidity_label ? ' · ' + s.liquidity_label : '');
+      return v;
+    },
+    md(t) { return t ? marked.parse(escapeHtml(t)) : ''; },
+    banner(r) {
+      const rec = this.recOf(r); const win = this.scen(r, rec.strategy); const ru = this.scen(r, rec.runner_up);
+      const w = escapeHtml(this.label(rec.strategy)), o = escapeHtml(this.label(rec.runner_up));
+      const diff = (win.risk_adjusted_score || 0) - (ru.risk_adjusted_score || 0);
+      if (!rec.runner_up) return 'Recommended: ' + w + '.';
+      if (rec.close_call) return 'Close call: ' + w + ' and ' + o + ' are within ' + escapeHtml(this.money(Math.abs(diff))) + ' of each other. ' + w + ' is preferred: less capital at risk and faster to cash.';
+      return 'Recommended: ' + w + ', ' + escapeHtml(this.money(diff)) + ' more risk-adjusted value than ' + o + '.';
+    },
+    isWorst(r, k, key) {
+      const st = this.scen(r, k).stress_tests; const vals = Object.values(st);
+      if (!vals.length || Math.min(...vals) === Math.max(...vals)) return false;
+      return Object.keys(st).find(x => st[x] === Math.min(...vals)) === key;
+    },
+    propertyInputs(r) { return r.analysis.assumptions.filter(a => !(this.DEFAULTS && a.name in this.DEFAULTS)); },
+    batchAssumptions(r) { return r.analysis.assumptions.filter(a => this.DEFAULTS && a.name in this.DEFAULTS && a.value != null); },
+
+    // ── include / drawer ──
+    async toggleInclude(r, on) {
+      try { Object.assign(r, await this.api(`/api/owned/batches/${this.batch.id}/rows/${r.id}`, { method: 'PATCH', json: { include: on } })); } catch (e) { this.error = e.message; }
+    },
+    openDrawer(r) { this.drawer = { row: r, values: { ...r.overrides }, error: '' }; },
+    drawerPlaceholder(k) {
+      const map = { loan_payoff: 'loan_payoff', loan_rate_pct: 'loan_rate', loan_pi: 'loan_pi', arv: 'arv', rehab_budget: 'rehab_quote', annual_tax: 'annual_tax', annual_insurance: 'annual_insurance', investor_payback: 'investor_payback', cost_basis: 'cost_basis' };
+      const v = map[k] && this.drawer.row.inputs[map[k]];
+      if (v != null && v !== '') return 'Spreadsheet: ' + Number(v).toLocaleString();
+      const e = this.drawer.row.estimates; if (e && e[k] != null) return 'Estimate: ' + Number(e[k]).toLocaleString();
+      return 'Blank';
+    },
+    async saveDrawer() {
+      const vals = {};
+      for (const f of this.DRAWER_FIELDS) { const v = this.drawer.values[f.key]; vals[f.key] = (v === '' || v == null) ? null : Number(v); }
+      try {
+        const r = await this.api(`/api/owned/batches/${this.batch.id}/rows/${this.drawer.row.id}`, { method: 'PATCH', json: { overrides: vals } });
+        Object.assign(this.drawer.row, r); this.drawer = null;
+      } catch (e) { this.drawer.error = e.message; }
+    },
+
+    // ── assumptions ──
+    assumptionLine() {
+      const a = this.batch.assumptions;
+      return `${a.discount_rate_pct}% discount · ${a.lc_default_prob_pct}% LC default · ${a.commission_pct}% commission + ${a.closing_pct}% closing · $${a.utilities_vacant_monthly}/mo utilities` + (a.lc_servicer ? ' · LC servicer ' + a.lc_servicer : '');
+    },
+    isChanged(k) { return this.batch && this.DEFAULTS && this.DEFAULTS[k] !== this.assumptionDraft[k]; },
+    async saveAssumptions() {
+      this.assumptionError = '';
+      const body = {};
+      this.assumptionGroups.forEach(g => g.fields.forEach(f => { const v = this.assumptionDraft[f.key]; if (v !== '' && v != null) body[f.key] = v; }));
+      try {
+        const out = await this.api(`/api/owned/batches/${this.batch.id}/assumptions`, { method: 'PUT', json: body });
+        this.batch.assumptions = out.assumptions; this.assumptionDraft = { ...out.assumptions }; this.showAssumptions = false;
+        if (this.doneRows().length) await this.recalculate();
+      } catch (e) { this.assumptionError = e.message; }
+    },
+    async resetAssumptions() {
+      try { const out = await this.api(`/api/owned/batches/${this.batch.id}/assumptions`, { method: 'PUT', json: {} }); this.batch.assumptions = out.assumptions; this.assumptionDraft = { ...out.assumptions }; if (this.doneRows().length) await this.recalculate(); }
+      catch (e) { this.assumptionError = e.message; }
+    },
+    async recalculate() {
+      this.recalcBusy = true;
+      try { const out = await this.api(`/api/owned/batches/${this.batch.id}/recalculate`, { method: 'POST' }); this.batch = out; this.liveMessage = out.recalculated + ' properties recalculated'; if (this.report) this.report = this.batch.rows.find(r => r.id === this.report.id); }
+      catch (e) { this.error = e.message; } finally { this.recalcBusy = false; }
+    },
+
+    // ── queue (E1: browser-driven, 2 lanes, resumable) ──
+    confirmStart() { if (this.batch.unconfirmed_statements) this.startDialog = true; else this.startQueue(); },
+    retryFailed() { this.retrying = true; this.startQueue(); },
+    stopQueue() { this.stopRequested = true; },
+    nextRow(claimed) {
+      return this.batch.rows.find(r => r.include && !claimed.has(r.id) &&
+        (r.status === 'queued' || (this.retrying && r.status.startsWith('failed'))));
+    },
+    async startQueue() {
+      if (this.queueRunning) return;
+      this.queueRunning = true; this.stopRequested = false; this.waitingTokens = false; this.error = '';
+      try { if ('wakeLock' in navigator) this.wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+      const claimed = new Set();
+      const total = this.countable().length;
+      const lane = async () => {
+        while (!this.stopRequested) {
+          if (!this.canAfford(1)) { this.waitingTokens = true; return; }
+          const r = this.nextRow(claimed);
+          if (!r) return;
+          claimed.add(r.id);
+          await this.runRow(r);
+          document.title = `(${this.doneRows().length}/${total}) PropYield`;
+        }
+      };
+      await Promise.all(Array.from({ length: this.batch.kind === 'single' ? 1 : LANES }, lane));
+      this.queueRunning = false; this.retrying = false;
+      try { this.wakeLock && await this.wakeLock.release(); } catch (e) {} this.wakeLock = null;
+      document.title = 'Owned Properties · PropYield';
+      await this.reloadBatch(); await this.refreshMe();
+      this.liveMessage = this.allDone() ? 'Batch complete' : 'Batch paused';
+    },
+    async runRow(r) {
+      const started = Date.now();
+      r.status = 'running'; r.step = ''; r.rationale = ''; r.error = null;
+      let resp;
+      try {
+        resp = await fetch(`/api/owned/batches/${this.batch.id}/rows/${r.id}/run`, { method: 'POST', headers: this.h() });
+      } catch (e) { r.status = 'queued'; this.stopRequested = true; this.error = 'Network error. The batch paused; press Resume.'; return; }
+      if (!resp.ok) {
+        let d = ''; try { d = (await resp.json()).detail; } catch (e) {}
+        if (resp.status === 402) { r.status = 'queued'; this.waitingTokens = true; this.stopRequested = true; }
+        else if (resp.status === 429) { r.status = 'queued'; this.error = d; this.stopRequested = true; }
+        else { await this.reloadBatch(); if (resp.status !== 409) this.error = d || 'Run failed'; }
+        return;
+      }
+      if (!this.isSuper && this.me) this.me.token_balance -= this.cost;
+      const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buf = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n'); buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            let ev; try { ev = JSON.parse(line.slice(6)); } catch (e) { continue; }
+            if (ev.status && !ev.done) { r.step = ev.status; this.liveMessage = r.inputs.address_line + ': ' + this.stepLabel(ev.status); }
+            if (ev.analysis) r.analysis = ev.analysis;
+            if (ev.text) r.rationale += ev.text;
+            if (ev.error) { r.error = ev.error; if (ev.refunded && !this.isSuper && this.me) this.me.token_balance += this.cost; }
+            if (ev.done) r.status = ev.status;
+          }
+        }
+      } catch (e) { /* stream cut: server resets the row after 10 minutes */ }
+      if (r.status === 'running') { await this.reloadBatch(); return; }
+      this.rowTimes.push(Date.now() - started);
+      // Pull the stored row so $ at stake and flags match the server.
+      try {
+        const b = await this.api('/api/owned/batches/' + this.batch.id);
+        const fresh = b.rows.find(x => x.id === r.id); if (fresh) Object.assign(r, fresh);
+      } catch (e) {}
+      this.liveMessage = r.inputs.address_line + ': ' + (r.status === 'done' ? this.label(this.recOf(r).strategy) : 'failed');
+    },
+
+    // ── report ──
+    openReport(r) { this.report = r; this.view = 'report'; this.writeupText = ''; this.writeupError = ''; window.scrollTo(0, 0); },
+    reportIndex() { return this.reportList().findIndex(r => r.id === this.report.id); },
+    stepReport(d) { const list = this.reportList(); const i = this.reportIndex() + d; if (list[i]) this.openReport(list[i]); },
+    async runWriteup(r) {
+      this.writeupBusy = true; this.writeupText = ''; this.writeupError = '';
+      try {
+        const resp = await fetch(`/api/owned/batches/${this.batch.id}/rows/${r.id}/writeup`, { method: 'POST', headers: this.h() });
+        if (!resp.ok) { let d = ''; try { d = (await resp.json()).detail; } catch (e) {} this.writeupError = d || 'Write-up failed'; return; }
+        if ((resp.headers.get('content-type') || '').includes('application/json')) { r.writeup = (await resp.json()).writeup; return; }
+        const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buf = '';
+        while (true) {
+          const { done, value } = await reader.read(); if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n'); buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const ev = JSON.parse(line.slice(6));
+            if (ev.text) this.writeupText += ev.text;
+            if (ev.error) this.writeupError = ev.error;
+          }
+        }
+        if (!this.writeupError) r.writeup = this.writeupText;
+      } catch (e) { this.writeupError = 'Write-up failed'; }
+      finally { this.writeupBusy = false; }
+    },
+
+    // ── statements ──
+    confirmedStatements() { return this.batch.statements.filter(s => s.confirmed).length; },
+    rowAddress(id) { const r = this.batch.rows.find(x => x.id === id); return r ? r.inputs.address_line + ', ' + (r.inputs.city || '') : ''; },
+    rowLoan(id) { const r = this.batch.rows.find(x => x.id === id); return r ? (r.overrides.loan_payoff ?? r.inputs.loan_payoff ?? 0) : 0; },
+    stmtEdit(st) {
+      if (!this.stmtEdits[st.id]) {
+        const e = st.extracted || {};
+        this.stmtEdits[st.id] = { payoff: e.payoff_amount ?? '', rate: e.interest_rate_pct ?? '', pi: e.monthly_pi ?? '' };
+      }
+      return this.stmtEdits[st.id];
+    },
+    stmtReady(st) { const e = this.stmtEdit(st); if (e.payoff === '' || e.payoff == null) return false; return Number(e.payoff) === 0 || (e.rate !== '' && e.rate != null && e.pi !== '' && e.pi != null); },
+    differs(st) { const sheet = this.rowLoan(st.row_id); const v = Number(this.stmtEdit(st).payoff); return sheet > 0 && v > 0 && Math.abs(v - sheet) / sheet > 0.05; },
+    stmtStatusLabel(st) {
+      return { read: st.row_id ? (st.stale ? 'Stale' : 'Pending') : 'Unmatched', confirmed: 'Confirmed', superseded: 'Superseded', unreadable: 'Unreadable scan', password: 'Password-protected', not_statement: 'Not a loan statement', too_large: 'Too large (> 4 MB)' }[st.status] || st.status;
+    },
+    stmtChip(st) { return st.status === 'confirmed' ? 'chip-green' : (st.status === 'read' ? 'chip-gold' : (st.status === 'superseded' ? '' : 'chip-red')); },
+    async uploadStatements(files) {
+      files = [...files]; if (!files.length) return;
+      this.stmtBusy = true;
+      for (let i = 0; i < files.length; i++) {
+        this.stmtProgress = `Reading ${i + 1} of ${files.length}`; this.liveMessage = this.stmtProgress;
+        const fd = new FormData(); fd.append('file', files[i]);
+        try { await this.api(`/api/owned/batches/${this.batch.id}/statements`, { method: 'POST', body: fd }); }
+        catch (e) { this.error = files[i].name + ': ' + e.message; }
+      }
+      this.stmtBusy = false; await this.reloadBatch();
+    },
+    async assignStatement(st, rowId) {
+      if (!rowId) return;
+      const existing = this.batch.statements.find(s => s.id !== st.id && s.row_id === Number(rowId) && s.status !== 'superseded');
+      if (existing && !confirm('This property already has a statement. Replace it?')) return;
+      try { await this.api(`/api/owned/statements/${st.id}/assign`, { method: 'POST', json: { row_id: Number(rowId) } }); await this.reloadBatch(); } catch (e) { this.error = e.message; }
+    },
+    async confirmStatement(st) {
+      const e = this.stmtEdit(st);
+      try {
+        await this.api(`/api/owned/statements/${st.id}/confirm`, { method: 'POST', json: { payoff: Number(e.payoff), rate: e.rate === '' ? null : Number(e.rate), pi: e.pi === '' ? null : Number(e.pi), confirm_stale: !!st.stale } });
+        await this.reloadBatch();
+      } catch (err) { this.error = err.message; }
+    },
+    async removeStatement(st) {
+      try { await this.api(`/api/owned/statements/${st.id}`, { method: 'DELETE' }); await this.reloadBatch(); } catch (e) { this.error = e.message; }
+    },
+    async viewStatement(st) {
+      const r = await fetch(`/api/owned/statements/${st.id}/file`, { headers: this.h() });
+      if (!r.ok) { this.error = 'This file was deleted after confirmation or 24 hours.'; return; }
+      window.open(URL.createObjectURL(await r.blob()), '_blank', 'noopener');
+    },
+
+    // ── Excel (D18) ──
+    exportExcel() {
+      const rows = this.visibleRows().filter(r => r.analysis);
+      const partial = !this.allDone() ? `Partial: ${this.doneRows().length} of ${this.countable().length}` : 'Complete';
+      const moneyFmt = '$#,##0';
+      const sheet = (aoa, moneyCols) => {
+        const ws = XLSX.utils.aoa_to_sheet(aoa.map(row => row.map(safeCell)));
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        for (let R = 2; R <= range.e.r; R++) for (const C of moneyCols) { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && c.t === 'n') c.z = moneyFmt; }
+        return ws;
+      };
+      const summary = [[`${this.batch.file_name} · ${partial}`], ['Address', 'City', 'Portfolio', 'Recommended exit', 'Close call', '$ at stake', 'Value today (best)', 'Value today (sell as-is)', 'Carry/mo', 'Months vacant', 'Confidence', 'Flags']];
+      rows.forEach(r => summary.push([r.inputs.address_line, r.inputs.city, r.inputs.portfolio || '', this.label(this.recOf(r).strategy), this.recOf(r).close_call ? 'Yes' : '', r.dollars_at_stake, this.bestValue(r), this.scen(r, 'sell_as_is').risk_adjusted_score, this.carryOf(r), r.inputs.months_vacant ?? '', r.analysis.property.confidence, r.flags.join('; ')]));
+      const exitsHead = ['Address', 'Recommended'];
+      this.STRATS.forEach(k => ['Risk-adjusted', 'NPV', 'Net profit', 'IRR', 'Peak capital', 'Months to liquidity', 'Eligible'].forEach(m => exitsHead.push(this.label(k) + ' · ' + m)));
+      const exits = [[`${this.batch.file_name} · ${partial}`], exitsHead];
+      rows.forEach(r => {
+        const line = [r.inputs.address_line, this.label(this.recOf(r).strategy)];
+        this.STRATS.forEach(k => { const s = this.scen(r, k); line.push(s.risk_adjusted_score, s.npv, s.net_profit, s.irr, s.peak_capital, s.months_to_liquidity, s.eligible ? 'Yes' : (s.disqualifier || 'No')); });
+        exits.push(line);
+      });
+      const exitMoney = []; this.STRATS.forEach((k, i) => { const b = 2 + i * 7; exitMoney.push(b, b + 1, b + 2, b + 4); });
+      const assum = [['Batch assumptions'], ['Name', 'Value', 'Source']];
+      Object.entries(this.batch.assumptions).forEach(([k, v]) => v != null && assum.push([k, v, 'batch']));
+      assum.push([], ['Per-property overrides'], ['Address', 'Field', 'Value']);
+      this.batch.rows.forEach(r => Object.entries(r.overrides || {}).forEach(([k, v]) => v != null && assum.push([r.inputs.address_line, k, v])));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, sheet(summary, [5, 6, 7, 8]), 'Summary');
+      XLSX.utils.book_append_sheet(wb, sheet(exits, exitMoney), 'Exits');
+      XLSX.utils.book_append_sheet(wb, sheet(assum, []), 'Assumptions');
+      XLSX.writeFile(wb, this.batch.file_name.replace(/\.[^.]+$/, '') + ' exit analysis.xlsx');
+    },
+  };
+}
+</script>
+</body>
+</html>
