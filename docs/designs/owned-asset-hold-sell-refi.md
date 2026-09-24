@@ -44,13 +44,13 @@ IRES staff build hold/sell/refi decisions by hand in spreadsheets: pulling comps
   - **Sell:** no tax line in the seller's proceeds (property tax proration is ignored in v1). The existing tax engine may be called with `owner_occupied=False` only to produce a buyer-side note ("a buyer's post-transfer tax would be about $X/yr"), because this can affect sale price. That note is text context only and never feeds a Hold or Refi number.
   - **Current tax bill is required for `hold`** at both UI and server. There is no fallback to the tax engine for Hold/Refi, so reassessed taxes can't leak in by default.
 - **Token cost is hardcoded to 1** in `/analyze` (`current_user.token_balance - 1`, and the 402 check is `< 1`). Replace with `REPORT_TOKEN_COST = {"hold": int(os.getenv("HOLD_REPORT_TOKEN_COST", "3"))}`, default 1 for every other type, used by both the balance check and the debit. Provisional default **3 tokens** until IRES confirms a price.
-- **Token debit timing:** today tokens are debited before streaming and never refunded if generation fails (`except` branches at the end of `stream_response` only yield an error). For `hold`, keep the debit before streaming (prevents double-spend from concurrent requests), but **refund the N tokens** in both `except` branches when no report text was produced. Leave refund behavior for other report types unchanged in this change (a separate, pre-existing issue).
+- **Token debit timing:** today tokens are debited before streaming and never refunded if generation fails (`except` branches at the end of `stream_response` only yield an error). For `hold`, keep the debit before streaming (prevents double-spend from concurrent requests). Refund exactly the debited amount (0 for superadmin) when the estimate call fails, times out, or returns invalid JSON, or when the narrative call raises before its first model text, even if the server table was already sent. No refund once narrative text has streamed. A refunded run's Analysis + BuyerLead rows are deleted [R3, R5, R6]. Leave refund behavior for other report types unchanged in this change (a separate, pre-existing issue).
 - **Daily limit:** a `hold` report counts as 1 run toward the tenant's `daily_limit`, like every other type. Cost is enforced through tokens, not the daily limit.
 - **Superadmin:** exempt from token debit (existing behavior) and from the entitlement 403, so the founder can demo and QA on any tenant.
 - **Gating must be server-side.** New column `Tenant.asset_analysis_enabled` (Boolean, default False). `/analyze` returns 403 for `analysis_type == "hold"` when the flag is off. Superadmin toggles it via `PUT /api/super/tenants/{tenant_id}` (`web/server.py:1713`) and `super.html`.
 - **Server-side validation before any debit:** `hold` requests missing any required field return 422 before the token check, the Analysis log, or the debit.
 - **Confidential owner data.** `/analyze` currently creates a `BuyerLead` row for every run and emails the full report text to the tenant sponsor contact, `REPORT_NOTIFICATION_EMAIL`, and every active tenant admin (`web/server.py:1891-1921`). For `hold`:
-  - **No report emails** to `REPORT_NOTIFICATION_EMAIL` (the founder's inbox) or the sponsor contact. The report is not a buyer lead. Tenant admins may still receive it, since they are IRES.
+  - **No report emails** to `REPORT_NOTIFICATION_EMAIL` (the founder's inbox) or the sponsor contact. The report is not a buyer lead. Active tenant admins (IRES) do receive it, with the JSON block stripped from the email body [R13].
   - The `BuyerLead` row is still created (the saved-reports list and delete flow depend on the `Analysis`/`BuyerLead` join at `web/server.py:1151`), with `buyer_name`/`buyer_email` left null. `report_text` is stored as today, so it inherits the existing tenant-scoped visibility and delete flow.
   - Raw owner inputs are **not** persisted as separate columns in v1. They exist only inside the generated report text. The `Analysis.asking_price` log column gets the current market value, not the loan balance.
 - **Web search:** add `hold` to `WEB_SEARCH_TYPES` (`web/server.py:62`) so comps and current refi rates are live.
@@ -65,10 +65,13 @@ Owner inputs live in a nested Pydantic model, `OwnedAssetInputs`, attached to `A
 |---|---|---|---|
 | `address` (existing field) | all | user | required |
 | `current_loan_balance` | all | user | required |
-| `interest_rate_pct` | Hold, Sell (payoff at horizon) | user | required |
-| `remaining_amort_months` | Hold, Sell | user | required (0 = interest-only) |
-| `prepayment_penalty` ($) | Sell, Refi | user | default 0 |
-| `actual_monthly_rent` | Hold, Refi | user | required |
+| `interest_rate_pct` | Hold (incl. Hold exit payoff) | user | required |
+| `remaining_amort_months` | Hold (incl. Hold exit payoff) | user | required (0 = interest-only) |
+| `loan_maturity_months` | Hold | user | optional (1-480); if inside horizon, Hold refinances the balloon at the refi rate [R9] |
+| `vacancy_pct` | Hold, Refi | user | default 5.0 [R8] |
+| `capex_reserve_pct` (of gross rent) | Hold, Refi | user | default 5.0 [R8] |
+| `prepayment_penalty` ($) | Sell, Refi (not at Hold exit; assumed expired [R10]) | user | default 0 |
+| `actual_monthly_rent` (scheduled rent) | Hold, Refi | user | required |
 | `actual_annual_opex` (excl. taxes and debt service) | Hold, Refi | user | required |
 | `current_annual_tax` | Hold, Refi | user | required |
 | `market_value_override` | Sell, Refi, Hold exit | user, else model-estimated from web comps | optional; report labels source |
@@ -117,7 +120,7 @@ Approach A:
 1. **Data (`web/database.py`):** add `Tenant.asset_analysis_enabled` (Boolean, default False). No other schema change.
 2. **Calc module (new `web/owned_asset.py`, pure functions, no I/O):**
    - `amortize(balance, rate_pct, months, periods)` returns the balance after N months and annual debt service (interest-only when `months == 0`).
-   - `hold_projection(inputs, market_value)` returns per-year NOI, debt service, cash flow, exit value, exit selling costs, loan payoff at horizon, net exit proceeds, and levered IRR. Year-0 equity = market value − loan balance (opportunity-cost basis: what they'd get by selling today, before selling costs).
+   - `hold_projection(inputs, market_value)` returns per-year NOI, debt service, cash flow, exit value, exit selling costs, loan payoff at horizon, net exit proceeds, and levered IRR. Year-0 equity = `sell_now()` net proceeds (opportunity-cost basis: the cash IRES would walk away with by selling today, after selling costs, prepayment penalty and payoff). [eng review R1/D2]
    - `sell_now(inputs, market_value)` returns gross value, selling costs, prepayment penalty, loan payoff, and net proceeds.
    - `cash_out_refi(inputs, market_value, refi_rate)` returns the new loan amount, payoff, closing costs, prepayment penalty, cash out, new debt service, new annual cash flow, and DSCR.
    - Each returns a dict that is the single source of truth for the table.
@@ -126,7 +129,7 @@ Approach A:
    - `HOLD_ESTIMATE_SYSTEM` (JSON-only estimate call) and `HOLD_SYSTEM` (narrative), with `hold` registered in `SYSTEM_PROMPTS` and `WEB_SEARCH_TYPES`. `HOLD_SYSTEM` writes valuation comps, market rent vs. actual rent gap, refi market context, risks, and a recommendation that references the server's computed numbers (supplied in the user message) without recomputing them.
    - `owned_asset_context(req)` builds the user message from owner inputs, labeling each value as user-entered or defaulted.
    - In `/analyze`: 422 validation for `hold` (first); 403 entitlement check; `REPORT_TOKEN_COST` for the balance check and debit; refund on failure for `hold`; skip founder/sponsor emails for `hold`.
-   - Expose `asset_analysis_enabled` and the hold token cost in `GET /api/tenant/{slug}` (`web/server.py:1120`); accept the flag in `PUT /api/super/tenants/{tenant_id}`.
+   - Expose `asset_analysis_enabled` and `hold_token_cost` in the authenticated `GET /api/me` (`web/server.py:1073`), not the public tenant endpoint [R12]; accept the flag in `PUT /api/super/tenants/{tenant_id}`.
 4. **Comparison table contract:** before streaming the narrative, the server emits a fenced JSON block `{"type":"hold_sell_refi","hold":{...},"sell":{...},"refi":{...},"assumptions":{...}}` built from `owned_asset.py` output, plus a rendered markdown table. `index.html` detects the block for structured rendering; if parsing fails, the markdown table still renders, so the report is never blank.
 5. **UI (`web/index.html`):**
    - "Hold / Sell / Refi" report option, shown only when the tenant is entitled, with its token cost on the option ("3 tokens").
@@ -327,3 +330,879 @@ Stop: CONVERGENCE
 
 > Export file locations (step 5), the JSON contract and markdown fallback (step 4), and effort are now addressed, but the step 7 tests still don't cover the JSON block or the exports, and the inner schema keys are shown only as {...}.
 <!-- gstack:office-hours:concerns:end -->
+
+## Engineering Review (/plan-eng-review, 2026-09-24)
+
+Target: docs/designs/owned-asset-hold-sell-refi.md (this file). Report file: this file.
+
+### Scope record
+feature answers: none proposed (no cuts); structure: A Original arrangement (D1, 2026-09-24); accepted scope: web/database.py, web/server.py, web/index.html, web/super.html, tests/conftest.py (+ fake Anthropic client), NEW web/owned_asset.py (pure calc + OwnedAssetInputs), NEW tests/test_owned_asset.py, NEW tests/test_analyze_hold.py; pending remedies: R1-R12 below.
+
+### Scope Challenge findings
+1. [P2] (confidence: 9/10) web/requirements.txt — no numpy/numpy-financial; IRR needs a small stdlib solver (bisection on NPV) in owned_asset.py. Factual; no new dependency. Reviewer: Claude.
+2. [P1] (confidence: 9/10) tests/ — /analyze has zero tests today (`grep analyze tests/*.py` → none) and conftest.py has no fake Anthropic client. Required to prove every approved /analyze behavior; carried as necessary implementation of approved contracts. Reviewer: Claude.
+3. [P2] (confidence: 9/10) web/server.py:1120 — `GET /api/tenant/{slug}` is unauthenticated and already returns `token_balance`, contact info and invite_template. The plan adds `asset_analysis_enabled` here. See R11. Reviewer: Claude.
+
+## Decision ledger
+
+### R1: Year-0 equity basis for Hold IRR (R2-3)
+Finding: R2-3, P1, confidence 9/10, doc "Recommended Approach" step 2 (`Year-0 equity = market value − loan balance (opportunity-cost basis ...)`), reviewer: spec review round 2.
+Plan baseline: gross basis, market value − loan balance (approved in D8 office-hours doc approval), with a contradicting rationale.
+Runtime evidence: none; owned_asset.py is proposed.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1 year-0 equity | value − loan (rationale contradicts) | sell_now net proceeds (value − selling costs − prepay penalty − payoff) | value − loan, rationale rewritten |
+| R2..R12 | pending | pending | pending |
+Question D2:
+D2 — What counts as IRES's starting investment when we compute Hold IRR?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: To say whether holding beats selling, we treat "the cash you'd walk away with if you sold today" as the money you're choosing to keep invested. The doc currently uses value minus loan, which ignores the ~7% it costs to sell and any prepayment penalty. That overstates the starting investment and makes Holding look worse than it really is.
+Stakes if we pick wrong: the report tilts toward "Sell" on every property, and IRES's asset manager catches it in the first spreadsheet comparison.
+Recommendation: A because it is the true opportunity cost and makes Hold and Sell comparable on the same dollars.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Net sale proceeds (recommended)
+  ✅ Matches the rationale: the cash IRES actually forgoes by not selling today
+  ✅ Hold IRR and Sell net proceeds use the same dollar base, so they compare cleanly
+  ❌ Slightly higher Hold IRR than a gross basis; must be labeled in assumptions
+B) Value minus loan
+  ✅ Simpler and matches how some owners quote "equity"
+  ❌ Understates Hold IRR by ignoring selling costs, biasing toward Sell
+Net: accurate opportunity cost vs. simpler but biased equity figure.
+Header: Equity basis
+Options:
+A) Net sale proceeds (recommended)
+year0_equity = sell_now().net_proceeds (value − selling_cost_pct − prepayment_penalty − loan payoff). Assumptions block labels it. Unit test: known inputs → expected IRR. Effort: human ~30min / CC ~5min. Low risk.
+B) Value minus loan
+Keep year0_equity = market value − loan balance; rewrite the rationale to say "gross equity basis". Unit test same shape. Effort: human ~15min / CC ~2min. Risk: biases recommendation toward Sell.
+
+State: approved
+Actual answer: A) Net sale proceeds (D2, 2026-09-24)
+Accepted scope: hold_projection year0_equity = sell_now().net_proceeds; assumptions block labels "starting equity = net proceeds if sold today"; unit test with known inputs → expected IRR.
+History: none
+
+### R2: Refi comparability with Hold (R2-12)
+Finding: R2-12, P1, confidence 8/10, doc Target User & Wedge item 3 ("new cash flow / DSCR") vs item 1 (IRR), reviewer: spec review round 2.
+Plan baseline: Refi column = cash out + one-year cash flow + DSCR, no horizon projection (D8).
+Runtime evidence: none; proposed.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1 equity basis | approved: net proceeds (D2) | net proceeds (fixed) | net proceeds (fixed) |
+| R2 Refi metrics | cash out + 1-yr CF + DSCR | + refi-then-hold projection over hold_years: annual CF, exit proceeds, IRR (cash out counted as year-0 inflow) | unchanged; HOLD_SYSTEM told to weigh metrics qualitatively with listed factors |
+| R3..R12 | pending | pending | pending |
+Question D3:
+D3 — Should the Refi column get its own multi-year projection so it can be compared to Hold?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Right now Hold shows a 5-year return (IRR), Sell shows cash today, and Refi shows cash out plus one year of cash flow. Those aren't the same kind of number, so the report can't honestly say which is best. Giving Refi the same 5-year treatment ("refinance, then keep holding") puts all three on one scale.
+Stakes if we pick wrong: the recommendation compares apples to oranges, and IRES has no number to check it against.
+Recommendation: A because it reuses hold_projection with a new loan, so the added math is small and all three paths share IRR.
+Completeness: A=9/10, B=6/10
+Pros / cons:
+A) Add refi-then-hold projection (recommended)
+  ✅ All three paths share one metric (IRR over hold_years) plus cash in hand today
+  ✅ Reuses hold_projection with the new loan swapped in, so little new math to test
+  ❌ One more column of numbers to explain in the report and Excel sheet
+B) Keep Refi as today-only metrics
+  ✅ Less math and a shorter report
+  ❌ Recommendation weighs non-comparable numbers; harder for IRES to trust
+Net: one shared metric for a small calc cost vs. a shorter but less comparable report.
+Header: Refi horizon
+Options:
+A) Add refi-then-hold projection (recommended)
+cash_out_refi() also returns a hold_years projection using hold_projection() with the new loan: annual cash flow, exit proceeds, and IRR where year 0 = net proceeds basis (R1) minus cash out. Unit tests: IRR for a known refi case; negative cash out. Effort: human ~2h / CC ~15min. Low risk.
+B) Keep Refi as today-only metrics
+No projection. HOLD_SYSTEM gets explicit decision factors (IRR vs. cash today vs. DSCR ≥ 1.25) and must say the comparison is qualitative. Effort: human ~20min / CC ~3min. Risk: weaker recommendation.
+
+State: approved
+Actual answer: A) Add refi-then-hold projection (D3, 2026-09-24)
+Accepted scope: cash_out_refi() returns a hold_years projection via hold_projection() with the new loan: annual cash flow, exit proceeds, IRR with year 0 = R1 net-proceeds basis minus cash out. Unit tests: known refi IRR; negative cash out. JSON block and Excel sheet include the refi projection.
+History: none
+
+### R3: Refund trigger for hold tokens (R2-1, R2-2)
+Finding: R2-1, P1, confidence 9/10, doc Constraints "refund the N tokens in both except branches when no report text was produced" vs Recommended Approach step 4 (server table emitted before narrative); R2-2 (superadmin never debited). Reviewer: spec review round 2. Runtime evidence: web/server.py `if current_user.role != "superadmin": current_user.token_balance = (current_user.token_balance or 0) - 1` runs before `stream_response`; both `except` branches only `yield` an error.
+Plan baseline: refund when "no report text was produced" (D8).
+R2-2 disposition: factual correctness of the approved refund contract, not a separate choice. A refund reverses only the debit that happened: track `debited = cost if not superadmin else 0` and refund exactly `debited`. Test: failed superadmin hold run leaves balances unchanged. Carried as required proof.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1 equity basis | approved (D2) | fixed | fixed |
+| R2 refi projection | approved (D3) | fixed | fixed |
+| R3 refund trigger | "no report text produced" (ambiguous) | refund if estimate fails, or narrative call raises before yielding any model text; server-emitted table does not count as report text | refund on any failure, even after partial narrative text streamed |
+| R2-2 refund amount | unspecified | refund exactly `debited` (0 for superadmin) | refund exactly `debited` (0 for superadmin) |
+| R4..R12 | pending | pending | pending |
+Question D4:
+D4 — When exactly should a failed Hold report refund IRES's tokens?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: A Hold report costs 3 tokens, taken before it runs. The server first sends the number table, then the AI writes the story. If the AI fails before writing anything, IRES got only a bare table and should get their tokens back. The question is what to do if the AI fails halfway through the story.
+Stakes if we pick wrong: either IRES pays 3 tokens for a broken report, or partial reports get refunded and can be farmed for free tables.
+Recommendation: A because the server's own table isn't what they paid for, and a half-written report still contains the model's analysis.
+Completeness: A=9/10, B=7/10
+Pros / cons:
+A) Refund unless narrative started (recommended)
+  ✅ Estimate failure or a narrative that never starts always refunds, even after the table was sent
+  ✅ Clear rule to test: a flag flips on the first model text chunk
+  ❌ A report that dies midway is not refunded; IRES must re-run and pay again
+B) Refund on any failure
+  ✅ Most generous to IRES; any error gets tokens back
+  ❌ Partial reports with full tables become free on a mid-stream error
+  ❌ A client disconnect mid-stream is hard to tell apart from a server failure
+Net: fair, testable refund rule vs. maximum generosity with a free-table loophole.
+Header: Refund trigger
+Options:
+A) Refund unless narrative started (recommended)
+Track `narrative_started` (true on first model text delta). Refund `debited` tokens when the estimate call fails/times out/returns bad JSON, or when the narrative call raises while narrative_started is false, even if the server table was already emitted. No refund once narrative text streamed. Tests: refund after table emitted + narrative raises; no refund after partial narrative; superadmin unchanged. Effort: human ~1h / CC ~10min. Low risk.
+B) Refund on any failure
+Refund `debited` tokens on any exception in the hold stream, regardless of how much narrative streamed. Tests: refund after partial narrative; superadmin unchanged. Effort: human ~45min / CC ~8min. Risk: free tables on mid-stream failure.
+
+State: approved
+Actual answer: A) Refund unless narrative started (D4, 2026-09-24)
+Accepted scope: Track debited (0 for superadmin) and narrative_started (true on first model text delta). Refund exactly debited when the estimate call fails/times out/returns bad JSON, or the narrative call raises while narrative_started is false, even if the server table was emitted. No refund after narrative text streamed. Tests: refund after table + narrative raise; no refund after partial narrative; superadmin failed run leaves balances unchanged.
+History: none
+
+### R4: Where the estimate call runs, and its time budget (R2-7)
+Finding: R2-7, P1, confidence 8/10, doc Inputs "Two-call flow" (estimate call unspecified location), web/vercel.json `"maxDuration": 300`. Reviewer: spec review round 2.
+Plan baseline: non-streamed estimate call, then streamed narrative; location and time bound unspecified (D8).
+Runtime evidence: web/vercel.json `"api/index.py": {"maxDuration": 300}`; web/server.py streams via `client.messages.stream(model=MODEL, max_tokens=MAX_TOKENS ...)` with MAX_TOKENS = 16000 and web search. Current single-call latency: unknown (not measured).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R3 | approved (D2-D4) | fixed | fixed |
+| R4 estimate location | unspecified | inside stream_response; emits `{"status":"estimating"}` SSE event first; covered by the same refund path (R3) | before StreamingResponse returns; HTTP request blocks until estimate completes, errors return JSON 502 with refund |
+| R4 estimate time bound | none | 60 s client timeout on the estimate call, max_tokens 1500; narrative keeps MAX_TOKENS | 60 s client timeout, max_tokens 1500 |
+| R5..R12 | pending | pending | pending |
+Question D5:
+D5 — Where should the "estimate value and refi rate" AI call run?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: A Hold report makes two AI calls: a quick one to look up today's value and refi rate, then the long write-up. Vercel kills any request after 300 seconds. If the quick call runs inside the same live stream, the user sees "Estimating current value..." right away and any failure goes through the refund rule we just approved. If it runs before the stream starts, the browser just spins with no feedback.
+Stakes if we pick wrong: users stare at a frozen screen for up to a minute, or a failed estimate skips the refund path and IRES loses 3 tokens.
+Recommendation: A because it gives immediate progress feedback and reuses the approved refund path with no second error route.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Inside the stream (recommended)
+  ✅ UI shows "Estimating current value..." the moment the request starts
+  ✅ Estimate failures flow through the single approved refund path (R3)
+  ❌ Errors arrive as SSE events, not HTTP status codes, so tests read the stream
+B) Before the stream starts
+  ✅ Estimate failures can return a normal HTTP error code
+  ❌ Browser shows nothing for up to 60 s; feels broken
+  ❌ Needs a second refund path outside stream_response
+Net: live progress and one refund path vs. conventional HTTP errors with a silent wait.
+Header: Estimate location
+Options:
+A) Inside the stream (recommended)
+Estimate call runs first inside stream_response, after yielding a status event the UI shows as "Estimating current value..."; 60 s timeout, max_tokens 1500; failures refund via R3. Narrative follows in the same stream. Worst case ≈ 60 s + today's single-report time; fits the 300 s limit only if current reports finish under ~240 s (not measured; verify with one timed production run). Tests: status event emitted first; timeout → refund + error event. Effort: human ~1.5h / CC ~15min. Low risk.
+B) Before the stream starts
+Estimate call runs in the /analyze handler before returning StreamingResponse; 60 s timeout, max_tokens 1500; failure refunds and returns HTTP 502 JSON. UI shows a generic spinner. Tests: 502 + refund on timeout. Effort: human ~1.5h / CC ~15min. Risk: silent wait, second refund path.
+
+State: approved
+Actual answer: A) Inside the stream (D5, 2026-09-24)
+Accepted scope: Estimate call runs first inside stream_response after a status SSE event (UI: 'Estimating current value...'); 60 s timeout, max_tokens 1500; failures refund via R3; narrative follows in the same stream. Verify: one timed production run of an existing report to confirm headroom under the 300 s limit. Tests: status event first; timeout → refund + error event.
+History: none
+
+### R5: Estimate JSON validation per field (R2-6)
+Finding: R2-6, P2, confidence 8/10, doc Inputs "If the estimate JSON is missing, unparsable, or non-positive ... 'Could not determine current market value'" (covers value only). Reviewer: spec review round 2.
+Plan baseline: one error message for market value only (D8).
+Runtime evidence: none; proposed.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R4 | approved (D2-D5) | fixed | fixed |
+| R5 per-field validation | value only | market_value > 0; refi_rate_pct in [2.0, 15.0]; each checked only when its override is blank | same checks |
+| R5 failure effect | whole report stops (value) | any failed field stops the whole report, refunds via R3, message names the exact override(s) to enter | failed value stops report; failed rate only blanks the Refi column ("enter a refi rate override"), report continues and is charged |
+| R6..R12 | pending | pending | pending |
+Question D6:
+D6 — If the AI can't find a believable refi rate, what happens to the report?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: The quick lookup call returns two things: today's value and today's refi rate. We'll reject a value of zero or less and a rate outside 2-15%. If the value fails, nothing can be computed. If only the rate fails, we could stop the whole report or show Hold and Sell with an empty Refi column.
+Stakes if we pick wrong: IRES pays 3 tokens for a report missing a third of its answer, or re-runs a report that was two-thirds useful.
+Recommendation: A because one rule ("stop, refund, tell me which box to fill") is simpler to test and IRES never pays for an incomplete comparison.
+Completeness: A=9/10, B=8/10
+Pros / cons:
+A) Stop and refund on any bad field (recommended)
+  ✅ IRES never pays for a comparison with a missing column
+  ✅ Error names the exact override, e.g. "Enter a refi rate (2-15%) and re-run"
+  ❌ A good value lookup is thrown away when only the rate fails
+B) Blank only the Refi column
+  ✅ Hold and Sell still arrive without a re-run
+  ❌ Charged 3 tokens for an incomplete comparison; the recommendation lacks Refi
+  ❌ A second output shape to render, export and test
+Net: one strict, refundable rule vs. a partial report IRES still pays for.
+Header: Bad estimate
+Options:
+A) Stop and refund on any bad field (recommended)
+Validate market_value > 0 and refi_rate_pct in [2.0, 15.0], each only when its override is blank. Any failure: no narrative, refund via R3, error event naming each missing override. Tests: bad value; bad rate with value override given; both bad; rate 1.5 and 16 rejected. Effort: human ~45min / CC ~8min. Low risk.
+B) Blank only the Refi column
+Same validation. Bad value stops + refunds; bad rate renders Hold/Sell, Refi column shows "enter a refi rate override", narrative skips Refi, full cost charged. Tests: both paths plus the partial table shape in JSON/Excel/PDF. Effort: human ~2h / CC ~20min. Risk: extra output shape.
+
+State: approved
+Actual answer: A) Stop and refund on any bad field (D6, 2026-09-24)
+Accepted scope: Validate market_value > 0 and refi_rate_pct in [2.0, 15.0], each only when its override is blank. Any failure: no narrative, refund via R3, error event naming each missing override. Tests: bad value; bad rate with value override given; both bad; rate 1.5 and 16 rejected.
+History: none
+
+### R6: Analysis/BuyerLead rows for hold runs that fail and refund (R2-8)
+Finding: R2-8, P2, confidence 9/10, doc Constraints "The `Analysis.asking_price` log column gets the current market value" (unknown until estimate). Runtime evidence: web/server.py writes `log = Analysis(...)`; `db.add(log); db.commit()` and `lead = BuyerLead(...)` before `stream_response`; the daily limit counts `Analysis` rows since `usage_start`; saved reports list joins `Analysis`/`BuyerLead` where `report_text` is not null (server.py:1151). Reviewer: spec review round 2.
+Plan baseline: rows written before stream as today; failure handling unspecified (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R5 | approved (D2-D6) | fixed | fixed |
+| R6 row timing | before stream (existing) | before stream (unchanged); asking_price = override if given, else updated after estimate succeeds | before stream (unchanged); same asking_price rule |
+| R6 on refunded failure | unspecified | delete the run's BuyerLead + Analysis rows in the refund transaction, so it does not count toward daily_limit or appear in history | keep rows; add Analysis.status column ('failed_refunded'); daily-limit query excludes failed rows |
+| R7..R12 | pending | pending | pending |
+Question D7:
+D7 — What should the database keep for a Hold run that failed and was refunded?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Every report creates a log row before it runs, and those rows count toward the daily limit of 5. If a Hold report fails and refunds, the row is still there: it eats one of IRES's daily runs, and it could show up as an empty saved report.
+Stakes if we pick wrong: a few failed runs lock IRES out for the day even though they got their tokens back.
+Recommendation: A because deleting the rows in the refund transaction needs no schema change and fully undoes a run IRES didn't pay for.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Delete rows on refund (recommended)
+  ✅ Failed runs don't count toward the daily limit or show in saved reports
+  ✅ No schema change; reuses the existing delete of Analysis + BuyerLead rows
+  ❌ No database record of failures; we'd rely on server logs to see them
+B) Keep rows, mark failed
+  ✅ Failure history stays queryable for support and debugging
+  ❌ New Analysis.status column, a migration, and changes to the daily-limit and history queries
+Net: clean undo with no migration vs. an audit trail that costs a schema change.
+Header: Failed run rows
+Options:
+A) Delete rows on refund (recommended)
+Keep writing Analysis + BuyerLead before the stream. asking_price = market_value_override if given, else updated after a successful estimate. In the refund transaction, delete the run's BuyerLead and Analysis rows and print a server log line. Tests: refunded run leaves no rows and does not count toward daily_limit. Effort: human ~45min / CC ~8min. Low risk.
+B) Keep rows, mark failed
+Add Analysis.status ('ok' | 'failed_refunded'), migrate, exclude failed rows from the daily-limit count and saved-reports list. Tests: failed row excluded from both. Effort: human ~2h / CC ~20min. Risk: schema migration on Supabase.
+
+State: approved
+Actual answer: A) Delete rows on refund (D7, 2026-09-24)
+Accepted scope: Analysis + BuyerLead still written before the stream. asking_price = market_value_override if given, else updated after a successful estimate. The refund transaction deletes the run's BuyerLead and Analysis rows and prints a server log line. Tests: refunded run leaves no rows and does not count toward daily_limit.
+History: none
+
+### R7: Range limits on owner inputs (R2-9)
+Finding: R2-9, P2, confidence 8/10, doc Constraints "`hold` requests missing any required field return 422" (presence only). Reviewer: spec review round 2. Runtime evidence: existing AnalysisRequest fields are `Optional[str]` with no bounds (server.py:107).
+Plan baseline: presence validation only (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R6 | approved (D2-D7) | fixed | fixed |
+| R7 input bounds | none | Pydantic Field bounds on OwnedAssetInputs, 422 before debit: balance ≥ 0; rate 0-25%; amort months 0-480; rent > 0; opex ≥ 0; tax ≥ 0; value override > 0; hold_years 1-30; growth/appreciation −10..+15%; selling cost 0-15%; LTV 0-90%; refi term 5-40 yr; closing cost 0-10%; prepay ≥ 0 | presence only; nonsense values produce nonsense math |
+| R8..R14 | pending | pending | pending |
+Question D8:
+D8 — Should the server reject impossible owner numbers before charging tokens?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: The plan already rejects missing fields. It doesn't reject a typo like an interest rate of 65% or a hold period of 0 years. Those would still charge 3 tokens and produce a report with garbage numbers.
+Stakes if we pick wrong: a fat-finger typo costs IRES 3 tokens and produces a report someone might actually forward.
+Recommendation: A because the bounds are one line per field in the Pydantic model and catch typos before any charge.
+Completeness: A=9/10, B=4/10
+Pros / cons:
+A) Add range limits (recommended)
+  ✅ Typos return a clear 422 naming the field, before any token is charged
+  ✅ One Field(...) constraint per input; FastAPI formats the error for free
+  ❌ Bounds may need widening for unusual assets (e.g., 20%+ hard-money rates)
+B) Presence check only
+  ✅ Nothing to tune; no chance of rejecting an unusual but real input
+  ❌ Garbage-in reports get charged and could reach IRES's investors
+Net: one-line guards per field vs. paying for typo reports.
+Header: Input bounds
+Options:
+A) Add range limits (recommended)
+Field bounds on OwnedAssetInputs: balance ≥ 0; rate 0-25%; amort months 0-480; rent > 0; opex ≥ 0; tax ≥ 0; value override > 0; hold_years 1-30; growth/appreciation −10..+15%; selling cost 0-15%; LTV 0-90%; refi term 5-40 yr; closing cost 0-10%; prepay ≥ 0. 422 before debit. Tests: one out-of-range value per bound group, no debit. Effort: human ~40min / CC ~6min. Low risk.
+B) Presence check only
+No bounds beyond the approved required-field 422. Effort: none. Risk: garbage reports are charged.
+
+State: approved
+Actual answer: A) Add range limits (D8, 2026-09-24)
+Accepted scope: Field bounds on OwnedAssetInputs as listed in the grid; 422 before any debit. Tests: one out-of-range value per bound group, no debit.
+History: none
+
+### R8: Vacancy and capital reserves in Hold/Refi NOI (R2-5)
+Finding: R2-5, P1, confidence 8/10, doc Inputs table (`actual_monthly_rent`, `actual_annual_opex (excl. taxes and debt service)`; no vacancy or reserve field). Runtime evidence: the acquisition scenarios already model vacancy and capex (server.py:416 `"vacancy": <n>, ... "capex": <n>`). Reviewer: spec review round 2.
+Plan baseline: NOI = 12 × rent − opex − tax; no vacancy/reserves (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R7 | approved (D2-D8) | fixed | fixed |
+| R8 vacancy/reserves | none (100% occupancy implied) | new inputs vacancy_pct (default 5.0) and capex_reserve_pct of gross rent (default 5.0), bounds 0-30%; rent field labeled "scheduled monthly rent"; both in assumptions block | no new fields; rent field labeled "collected rent (net of vacancy)" and opex "including reserves"; assumption printed |
+| R9..R14 | pending | pending | pending |
+Question D9:
+D9 — How should Hold and Refi account for vacancy and capital reserves?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Right now the math assumes the property is rented every month forever and never needs a new roof. The acquisition reports already subtract vacancy and a capex reserve. For owned assets we can either add those two inputs with sensible defaults, or tell IRES to enter rent already net of vacancy and expenses including reserves.
+Stakes if we pick wrong: Hold cash flow and refi DSCR look better than reality, and IRES's analyst notices immediately.
+Recommendation: A because it matches how PropYield's acquisition reports already work, and defaults keep the form fast.
+Completeness: A=9/10, B=6/10
+Pros / cons:
+A) Add vacancy and reserve inputs (recommended)
+  ✅ Consistent with the acquisition reports' vacancy and capex lines
+  ✅ Defaults (5% / 5%) are editable, so IRES can match its own underwriting
+  ❌ Two more form fields, and double-counting if someone enters net rent
+B) Label rent as net instead
+  ✅ No new fields; the math stays simpler
+  ❌ Relies on IRES reading a label; easy to overstate cash flow
+  ❌ Inconsistent with how acquisition reports present NOI
+Net: explicit, consistent assumptions vs. a lighter form that trusts a label.
+Header: Vacancy/reserves
+Options:
+A) Add vacancy and reserve inputs (recommended)
+Add vacancy_pct (default 5.0) and capex_reserve_pct of gross rent (default 5.0), bounds 0-30% (R7 style). NOI = rent×12×(1−vacancy) − opex − tax − reserve. Rent labeled "scheduled monthly rent". Shown in assumptions. Unit test: NOI with both defaults. Effort: human ~40min / CC ~6min. Low risk.
+B) Label rent as net instead
+No new fields. Rent labeled "collected rent (net of vacancy)", opex "including capital reserves"; assumptions block states it. Effort: human ~10min / CC ~2min. Risk: overstated NOI on mis-entry.
+
+State: approved
+Actual answer: A) Add vacancy and reserve inputs (D9, 2026-09-24)
+Accepted scope: Add vacancy_pct (default 5.0) and capex_reserve_pct of gross rent (default 5.0), bounds 0-30%. NOI = rent×12×(1−vacancy) − opex − tax − reserve. Rent labeled 'scheduled monthly rent'. Both in assumptions block. Unit test: NOI with defaults.
+History: none
+
+### R9: Loan maturity inside the hold horizon (R2-10)
+Finding: R2-10, P2, confidence 8/10, doc Constraints "balloon modeling beyond 'balance due at maturity' are out of v1" with no maturity input; interest-only = `remaining_amort_months = 0` with no end date. Reviewer: spec review round 2.
+Plan baseline: no maturity field (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R8 | approved (D2-D9) | fixed | fixed |
+| R9 maturity | none | optional loan_maturity_months (1-480); if < hold_years×12, the Hold projection refinances the remaining balance (refi-then-hold is unaffected: the original loan is paid off at year 0) at maturity at the validated refi rate (R5) over refi_term_years, and the table flags "loan matures in year N" | no field; assumptions block states "assumes the current loan does not mature within the hold period" |
+| R10..R14 | pending | pending | pending |
+Question D10:
+D10 — What if IRES's loan comes due before the hold period ends?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Many investor loans are 5- or 7-year balloons, or interest-only for a set time. If the loan comes due in year 3 of a 5-year hold, "just keep holding" actually means "refinance in year 3." Without a maturity date, the math keeps paying the old loan forever and hides that.
+Stakes if we pick wrong: the Hold column looks safe on a property that actually faces a forced refinance at today's higher rates.
+Recommendation: A because balloon loans are common for rental portfolios, and the refinance math already exists from R2.
+Completeness: A=9/10, B=5/10
+Pros / cons:
+A) Add optional maturity date (recommended)
+  ✅ Catches the forced-refinance risk that balloon and IO loans create
+  ✅ Reuses the refi math approved in R2; no new financial model
+  ❌ One more optional field, and a refi assumption inside the Hold path
+B) Assume no maturity in horizon
+  ✅ Simplest; no extra field or branch
+  ❌ Silently wrong for balloon/IO loans, the ones where the decision matters most
+Net: surface forced-refinance risk with existing math vs. a simpler but blind Hold path.
+Header: Loan maturity
+Options:
+A) Add optional maturity date (recommended)
+Optional loan_maturity_months (1-480, R7 bounds). If < hold_years×12, the Hold projection refinances the remaining balance at maturity (refi-then-hold unaffected, original loan paid off at year 0) at the validated refi rate (R5) over refi_term_years, and the table shows "loan matures in year N — refinance assumed." Unit tests: balloon in year 3 of 5; maturity after horizon unchanged; IO loan with maturity. Effort: human ~1.5h / CC ~15min. Low-medium risk.
+B) Assume no maturity in horizon
+No field. Assumptions block: "assumes the current loan does not mature within the hold period." Effort: human ~5min / CC ~1min. Risk: misleading Hold for balloon loans.
+
+State: approved
+Actual answer: A) Add optional maturity date (D10, 2026-09-24)
+Accepted scope: Optional loan_maturity_months (1-480). If < hold_years×12, the Hold projection refinances the remaining balance at maturity at the validated refi rate (R5) over refi_term_years; refi-then-hold unaffected. Table flags 'loan matures in year N — refinance assumed'. Unit tests: balloon in year 3 of 5; maturity after horizon unchanged; IO loan with maturity.
+History: none
+
+### R10: Prepayment penalty at the Hold exit (R2-11)
+Finding: R2-11, P3, confidence 9/10, doc Inputs table rows `interest_rate_pct | Hold, Sell (payoff at horizon)` and `remaining_amort_months | Hold, Sell`, `prepayment_penalty | Sell, Refi`. Reviewer: spec review round 2.
+Factual correction (no behavior change, no question): the Path(s) column is wrong. Rate and amortization feed Hold (and the Hold exit payoff), not Sell; Sell uses today's balance. Corrected in the working plan when outputs are written.
+Plan baseline: penalty applied to Sell and Refi; Hold exit unspecified (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R9 | approved (D2-D10) | fixed | fixed |
+| R10 penalty at Hold exit | unspecified | not applied at the Hold exit; assumptions block says "prepayment penalty assumed expired by end of hold period" | the same dollar penalty is also deducted at the Hold exit |
+| R11..R14 | pending | pending | pending |
+Question D11:
+D11 — Should the prepayment penalty also come out when the Hold path sells at the end?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: The penalty IRES enters is what they'd owe if they paid the loan off today. Most investor-loan penalties step down and expire over a few years. The Hold path sells in year 5, so charging today's penalty then would usually overstate the cost of holding.
+Stakes if we pick wrong: Hold looks slightly worse than reality, or, for a loan whose penalty doesn't expire, slightly better.
+Recommendation: A because step-down penalties usually expire by a 5-year exit, and the assumption is printed so IRES can see it.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Assume expired at exit (recommended)
+  ✅ Matches how step-down penalties usually behave by year 5
+  ✅ Assumption printed in the report, so IRES can challenge it
+  ❌ Wrong for loans with long yield-maintenance terms (out of v1 scope anyway)
+B) Also charge at Hold exit
+  ✅ Conservative; never understates the cost of holding
+  ❌ Usually double-penalizes Hold with a cost that will have expired
+Net: realistic default with a printed assumption vs. a conservative penalty that usually won't exist.
+Header: Exit penalty
+Options:
+A) Assume expired at exit (recommended)
+hold_projection() does not deduct prepayment_penalty at the exit. Assumptions block: "prepayment penalty assumed expired by end of hold period." Inputs table Path(s) corrected. Unit test: Hold exit proceeds exclude the penalty. Effort: human ~10min / CC ~2min. Low risk.
+B) Also charge at Hold exit
+hold_projection() deducts the same dollar prepayment_penalty at the exit. Inputs table Path(s) corrected. Unit test: Hold exit proceeds include the penalty. Effort: human ~10min / CC ~2min. Risk: understates Hold.
+
+State: approved
+Actual answer: A) Assume expired at exit (D11, 2026-09-24)
+Accepted scope: hold_projection() does not deduct prepayment_penalty at the exit; assumptions block states 'prepayment penalty assumed expired by end of hold period'. Inputs table Path(s) corrected (rate/amortization → Hold and Hold exit payoff; Sell uses today's balance). Unit test: Hold exit proceeds exclude the penalty.
+History: none
+
+### R11: Underwater properties and IRR that can't be computed (R2-4)
+Finding: R2-4, P1, confidence 9/10, doc Recommended Approach step 2 (IRR always returned); with R1 approved, year-0 equity = net sale proceeds, which is ≤ 0 whenever value − selling costs − penalty ≤ loan balance. Scope finding 1: IRR is a stdlib bisection solver (no numpy). Reviewer: spec review round 2 + Claude.
+Plan baseline: IRR always returned; no undefined case (D8).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R10 | approved (D2-D11) | fixed | fixed |
+| R11 undefined IRR | unspecified | IRR = null + reason when year-0 equity ≤ 0, cash flows have no sign change, or bisection on [−99%, +1000%] fails to converge in 200 iterations; table and narrative show the reason and fall back to cumulative cash flow + exit proceeds; report still runs and is charged | refuse underwater properties (net proceeds ≤ 0): 422 before debit when value override given, else error event + refund via R3 after the estimate; non-convergence still null + reason |
+| R12..R14 | pending | pending | pending |
+Question D12:
+D12 — What does the report show when IRR can't be calculated, e.g. an underwater property?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: IRR needs you to put money in first. If a property is underwater (selling today wouldn't cover the loan and costs), IRES has no cash to "keep invested," and IRR has no meaningful answer. The math also sometimes can't find a single answer. We can show "IRR not meaningful, here's why" with the cash-flow totals instead, or refuse to run underwater properties.
+Stakes if we pick wrong: the report prints a nonsense IRR on the exact property where hold vs. sell matters most, or refuses to analyze it.
+Recommendation: A because underwater properties are the hardest decisions and still deserve a report, just without a fake IRR.
+Completeness: A=10/10, B=6/10
+Pros / cons:
+A) Show "IRR not meaningful" (recommended)
+  ✅ Underwater properties still get a full Hold/Sell/Refi comparison
+  ✅ Reason string tells IRES why the IRR is blank, never a fake number
+  ❌ The narrative must handle a missing IRR, which adds one prompt instruction
+B) Refuse underwater properties
+  ✅ Every report that runs has a real IRR
+  ❌ Blocks analysis on the properties where the decision is hardest
+Net: always analyze with an honest blank vs. refuse the hardest cases.
+Header: Undefined IRR
+Options:
+A) Show "IRR not meaningful" (recommended)
+irr() returns (None, reason) when year-0 equity ≤ 0, cash flows have no sign change, or bisection on [−99%, +1000%] doesn't converge within 200 iterations. JSON block carries irr: null + irr_reason; table/Excel/PDF show the reason; HOLD_SYSTEM told to compare cumulative cash flow and exit proceeds instead. Unit tests: underwater case; no sign change; normal case converges. Effort: human ~1h / CC ~10min. Low risk.
+B) Refuse underwater properties
+When sell_now net proceeds ≤ 0: 422 before debit if value override given, else error event + refund via R3 after the estimate ("property is underwater; IRR comparison not supported"). Non-convergence still returns null + reason. Tests: underwater 422 with no debit; underwater after estimate refunds; non-convergence reason. Effort: human ~45min / CC ~8min. Risk: blocks key use case.
+
+State: approved
+Actual answer: A) Show 'IRR not meaningful' (D12, 2026-09-24)
+Accepted scope: irr() returns (None, reason) when year-0 equity ≤ 0, no sign change, or bisection on [−99%, +1000%] doesn't converge in 200 iterations. JSON carries irr: null + irr_reason; table/Excel/PDF show the reason; HOLD_SYSTEM compares cumulative cash flow and exit proceeds instead. Unit tests: underwater; no sign change; normal convergence.
+History: none
+
+### R12: Where the UI learns the tenant is entitled (Scope finding 3)
+Finding: Scope finding 3, P2, confidence 9/10, web/server.py:1120 `@app.get("/api/tenant/{slug}")` has no auth dependency (`async def get_tenant_branding(slug: str, db: Session = Depends(get_db))`); doc Recommended Approach step 3 "Expose `asset_analysis_enabled` and the hold token cost in `GET /api/tenant/{slug}`". Runtime evidence: `/api/me` (server.py:1073) requires `auth.get_current_user` and index.html already calls it (index.html:1421). Reviewer: Claude.
+Plan baseline: expose on the public endpoint (D8).
+Out of scope, flagged: the public endpoint already returns `token_balance`, contact info and `invite_template` to anyone who knows a slug. Pre-existing; see TODO proposal.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R11 | approved (D2-D12) | fixed | fixed |
+| R12 entitlement exposure | public /api/tenant/{slug} | authenticated /api/me adds `asset_analysis_enabled` and `hold_token_cost`; public endpoint unchanged | public /api/tenant/{slug} adds both fields (as planned) |
+| R13..R14 | pending | pending | pending |
+Question D13:
+D13 — Should the "IRES has the Hold module" flag be visible only to logged-in users?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: The plan tells the app a tenant has the Hold module through a page anyone can load without logging in. That reveals which clients bought the module. The logged-in "who am I" endpoint, already called by the app, can carry the same flag privately.
+Stakes if we pick wrong: anyone with IRES's slug can see what they bought; low harm, but avoidable in one line.
+Recommendation: A because /api/me is already authenticated and already fetched by index.html, so it's the same work in a private place.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Expose via /api/me (recommended)
+  ✅ Only logged-in tenant users learn about the entitlement and its token cost
+  ✅ index.html already fetches /api/me after login, so no new request is needed
+  ❌ The option only appears after login data loads (a brief delay)
+B) Expose via public tenant endpoint
+  ✅ Matches the approved doc; available before login finishes
+  ❌ Leaks which tenants bought the module to anyone with a slug
+Net: private flag at the same cost vs. following the doc and leaking entitlements.
+Header: Entitlement API
+Options:
+A) Expose via /api/me (recommended)
+/api/me adds asset_analysis_enabled (from tenant) and hold_token_cost (REPORT_TOKEN_COST['hold']); index.html reads them from its existing /api/me call; public /api/tenant/{slug} unchanged. Server 403 remains the real gate. Test: /api/me returns both fields for an entitled tenant; public endpoint does not. Effort: human ~20min / CC ~4min. Low risk.
+B) Expose via public tenant endpoint
+GET /api/tenant/{slug} adds both fields. Test: fields present. Effort: human ~15min / CC ~3min. Risk: entitlement visible without login.
+
+State: approved
+Actual answer: A) Expose via /api/me (D13, 2026-09-24)
+Accepted scope: /api/me adds asset_analysis_enabled and hold_token_cost; index.html reads them from its existing /api/me call; public /api/tenant/{slug} unchanged; server 403 remains the gate. Test: /api/me returns both fields for an entitled tenant; public endpoint does not.
+History: none
+
+### R13: Tenant-admin emails and the JSON block in stored/emailed text (R2-14)
+Finding: R2-14, P2, confidence 8/10, doc Constraints "Tenant admins may still receive it, since they are IRES." Runtime evidence: web/server.py builds `email_body = (... f"Analysis type: {req.analysis_type}\n\n{report_text}")` and sends it to `admin_recipients`, which adds every active tenant admin; `lead.report_text = report_text` is what the saved-reports list returns. Reviewer: spec review round 2.
+Plan baseline: no founder/sponsor emails (approved D8); tenant admins undecided.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R12 | approved (D2-D13) | fixed | fixed |
+| founder/sponsor emails | approved off for hold (D8) | off (fixed) | off (fixed) |
+| R13 tenant-admin emails | undecided | sent, like other report types | not sent for hold |
+| R13 JSON fence in email | unspecified | stripped from the email body; markdown table kept | n/a (no email) |
+| R13 JSON fence in saved report_text | unspecified | kept in stored report_text so reopened reports re-render the structured table/Excel; index.html hides the raw fence | kept; same rendering |
+| R14 | pending | pending | pending |
+Question D14:
+D14 — Should IRES's own admins get Hold reports by email?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Every report today is emailed to the tenant's admins. We've already turned off the copies to you and the sponsor for Hold reports. The open question is IRES's own admins. Either way, we save the report with its hidden data block so reopening it redraws the table and Excel sheet, and emails never show the raw data block.
+Stakes if we pick wrong: IRES admins either miss reports they expect, or their loan numbers sit in more inboxes than needed.
+Recommendation: A because the admins are IRES, it matches how every other report behaves, and they'd notice if Hold reports alone went missing.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Email IRES admins (recommended)
+  ✅ Consistent with every other report type; admins keep their usual copy
+  ✅ Raw JSON block is stripped, so the email reads cleanly with the markdown table
+  ❌ Loan and operating numbers land in every IRES admin inbox
+B) No emails for Hold reports
+  ✅ Owner financials stay only in PropYield, the fewest places possible
+  ❌ Admins must log in to see Hold reports, unlike every other type
+Net: consistent admin copies vs. keeping confidential numbers out of email entirely.
+Header: Admin emails
+Options:
+A) Email IRES admins (recommended)
+Hold reports email active tenant admins only (no founder/sponsor, per D8). The fenced JSON block is stripped from the email body; the markdown table stays. Stored report_text keeps the fence so reopened reports re-render; index.html hides the raw fence. Tests: admin recipients only; email body has no JSON fence; stored text has it. Effort: human ~40min / CC ~6min. Low risk.
+B) No emails for Hold reports
+Hold reports send no email at all. Stored report_text keeps the fence; index.html hides the raw fence. Tests: no send_report_email calls for hold; stored text has fence. Effort: human ~20min / CC ~4min. Low risk.
+
+State: approved
+Actual answer: A) Email IRES admins (D14, 2026-09-24)
+Accepted scope: Hold reports email active tenant admins only (no founder/sponsor, per D8). Fenced JSON block stripped from email body; markdown table kept. Stored report_text keeps the fence so reopened reports re-render; index.html hides the raw fence. Tests: admin recipients only; email body has no JSON fence; stored text has it.
+History: none
+
+### R14: Regression contract for the 12 existing report types (Test review, IRON RULE)
+Finding: Test review, P1 CRITICAL, confidence 9/10, web/server.py `/analyze`: `if current_user.role != "superadmin" and (current_user.token_balance or 0) < 1: raise HTTPException(402, ...)` and `current_user.token_balance = (current_user.token_balance or 0) - 1` are replaced by REPORT_TOKEN_COST (approved D8 office-hours doc). The email block and SYSTEM_PROMPTS dispatch are also edited for hold. `grep analyze tests/*.py` → no tests. Reviewer: Claude.
+Plan baseline: no regression tests for existing types (D8).
+Behavior to preserve (non-hold types): debit exactly 1 token; 402 when balance < 1; superadmin not debited; 429 at daily_limit; Analysis + BuyerLead rows written; report emails to sponsor, REPORT_NOTIFICATION_EMAIL and tenant admins unchanged; no refund on failure (unchanged pre-existing behavior); SYSTEM_PROMPTS dispatch per type unchanged. Intentional changes: none for non-hold types.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| R1-R13 | approved (D2-D14) | fixed | fixed |
+| R14 regression coverage | none | integration tests with a fake Anthropic client in conftest.py: all preserved behaviors on type "full", plus the 1-token debit parametrized over all 12 existing types | integration tests of all preserved behaviors on type "full" only |
+Question D15:
+D15 — How should we prove the change doesn't break the 12 existing report types?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: To support a 3-token Hold report, we're changing the code that charges 1 token for every existing report, and the code that emails them. There are no tests on that code today. We need tests that pin today's behavior (1 token, limits, emails) before touching it. The choice is whether to check the 1-token charge on all 12 types or just one representative type.
+Stakes if we pick wrong: a typo in the new cost table silently charges GPM or Vantage agents the wrong amount on some report type.
+Recommendation: A because parametrizing the debit check over all 12 types costs one extra decorator and catches a bad cost-table entry for any type.
+Completeness: A=10/10, B=8/10
+Pros / cons:
+A) Full contract + all 12 types (recommended)
+  ✅ Every existing type proven to still cost exactly 1 token
+  ✅ Fake Anthropic client in conftest makes /analyze testable for all future work
+  ❌ 12 extra parametrized cases (fast, but more test output)
+B) Full contract on "full" type only
+  ✅ Fewer test cases; same fake client and preserved-behavior checks
+  ❌ A wrong cost-table entry for another type would slip through
+Net: complete per-type proof for one decorator vs. a representative sample.
+Header: Regression tests
+Options:
+A) Full contract + all 12 types (recommended)
+tests/conftest.py adds a FakeAnthropicClient (stream yields text deltas; can raise). A TestAnalyzeRegression class in tests/test_analyze_hold.py (already-approved file, D1): on type "full" assert 1-token debit, 402 at 0, superadmin not debited, 429 at daily_limit, rows written, emails to sponsor + REPORT_NOTIFICATION_EMAIL + admins, no refund on failure; plus parametrized 1-token debit over all 12 existing types. Written and passing BEFORE the /analyze edit. Effort: human ~3h / CC ~20min. Low risk.
+B) Full contract on "full" type only
+Same fake client and the same preserved-behavior assertions on type "full" only; no per-type parametrization. Written before the /analyze edit. Effort: human ~2.5h / CC ~15min. Risk: per-type cost errors missed.
+
+State: approved
+Actual answer: A) Full contract + all 12 types (D15, 2026-09-24)
+Accepted scope: FakeAnthropicClient in tests/conftest.py; TestAnalyzeRegression in tests/test_analyze_hold.py pins, on type 'full': 1-token debit, 402 at 0, superadmin not debited, 429 at daily_limit, rows written, emails to sponsor + REPORT_NOTIFICATION_EMAIL + admins, no refund on failure; plus 1-token debit parametrized over all 12 existing types. Written and passing BEFORE the /analyze edit. CRITICAL regression contract.
+History: none
+
+### T1: TODO — public tenant endpoint leaks balances and contacts
+Finding: Scope finding 3 follow-up, P2, confidence 9/10, web/server.py:1120-1134 returns `"daily_limit": tenant.daily_limit, "token_balance": tenant.token_balance or 0, "invite_template": ...` plus contact fields with no auth dependency. Pre-existing; not part of this feature. Reviewer: Claude.
+Plan baseline: not addressed.
+Comparison grid:
+| Choice | Current | A | B | C |
+|---|---|---|---|---|
+| T1 disposition | not tracked | add TODO to TODOS.md | skip | build in this PR |
+Question D16:
+D16 — Track the public tenant-endpoint leak as a TODO?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: The login-page endpoint for each tenant, which anyone can load, returns that tenant's token balance, daily limit, contact info and invite email template. Branding needs to be public. The balance and template don't. It's unrelated to the Hold feature, so the question is whether to write it down, skip it, or fix it now.
+Stakes if we pick wrong: anyone who knows a partner's slug can see how many tokens they hold and their invite copy.
+Recommendation: A because it's a real but low-severity leak outside this feature, and a TODO keeps this PR focused.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Add to TODOS.md (recommended)
+  ✅ Captured with context, so it gets fixed deliberately and tested on its own
+  ✅ Keeps the Hold PR scoped to IRES's feature
+  ❌ The leak stays live until someone picks the TODO up
+B) Skip
+  ✅ No tracking overhead
+  ❌ A known data exposure is forgotten
+C) Build it in this PR
+  ✅ Closes the leak now
+  ❌ Needs checking which pages read those fields before login; widens the PR
+Net: track it cleanly vs. forget it vs. widen this PR.
+Header: TODO: leak
+Options:
+A) Add to TODOS.md (recommended)
+New TODO (P2, Security): move token_balance, daily_limit and invite_template off the public GET /api/tenant/{slug} to authenticated endpoints after auditing index.html/admin.html callers. Effort when done: human ~2h / CC ~15min.
+B) Skip
+Not tracked.
+C) Build it in this PR
+Add the endpoint change and caller audit to this PR's scope, with tests that the public response omits those fields.
+
+State: approved
+Actual answer: A) Add to TODOS.md (D16, 2026-09-24)
+Accepted scope: TODO added to TODOS.md under ## Security (P2): remove token_balance, daily_limit, invite_template from public GET /api/tenant/{slug}.
+History: none
+
+### T2: TODO — refund tokens on failed reports for all types
+Finding: R14 preserved behavior ("no refund on failure (unchanged pre-existing behavior)"), P3, confidence 9/10, web/server.py `stream_response` `except anthropic.APIStatusError as e: yield ...` / `except Exception as e: yield ...` with the 1-token debit taken before streaming. Reviewer: Claude.
+Plan baseline: out of scope for this PR (D8: "Leave refund behavior for other report types unchanged").
+Comparison grid:
+| Choice | Current | A | B | C |
+|---|---|---|---|---|
+| T2 disposition | not tracked | add TODO to TODOS.md | skip | build in this PR |
+Question D17:
+D17 — Track "refund failed reports for every report type" as a TODO?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: Hold reports will refund tokens when the AI fails before writing anything. The other 12 report types still keep the token even when they fail. The Hold refund logic, once built and tested, can later be reused for all types. This PR deliberately leaves them alone.
+Stakes if we pick wrong: agents on GPM or Vantage keep losing a token on every failed report, a support complaint waiting to happen.
+Recommendation: A because the refund helper will exist after this PR, making the follow-up small and low-risk.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Add to TODOS.md (recommended)
+  ✅ The follow-up reuses the tested Hold refund logic, so it becomes cheap
+  ✅ Keeps this PR's regression contract (R14) intact, with no change for 12 types
+  ❌ Existing agents keep losing tokens on failures until it ships
+B) Skip
+  ✅ No tracking overhead
+  ❌ The inconsistency between Hold and other types is forgotten
+C) Build it in this PR
+  ✅ Fixes all types at once
+  ❌ Contradicts the approved R14 regression contract ("no refund on failure" preserved)
+Net: cheap tracked follow-up vs. forgetting it vs. reopening the regression contract.
+Header: TODO: refunds
+Options:
+A) Add to TODOS.md (recommended)
+New TODO (P3, Reports): apply the Hold refund-unless-narrative-started rule to all report types (1 token), updating the R14 regression test's "no refund" assertion intentionally. Effort when done: human ~1h / CC ~10min.
+B) Skip
+Not tracked.
+C) Build it in this PR
+Reopen R14: change non-hold types to refund on failure in this PR and update the regression contract.
+
+State: approved
+Actual answer: A) Add to TODOS.md (D17, 2026-09-24)
+Accepted scope: TODO added to TODOS.md under ## Reports (P3): refund tokens on failed reports for every report type.
+History: none
+
+### T3: TODO — owned-asset records (Approach B)
+Finding: design doc "Approach B: Owned-asset records + report ... Deferred, not rejected"; P3; confidence 9/10; reviewer: office-hours. Decision log ffb5d298 records the upgrade trigger.
+Plan baseline: deferred (D7 office-hours).
+Comparison grid:
+| Choice | Current | A | B | C |
+|---|---|---|---|---|
+| T3 disposition | deferred in doc only | add TODO to TODOS.md | skip | build in this PR |
+Question D18:
+D18 — Put the deferred "store IRES's properties once" work (Approach B) on the TODO list?
+Project/branch/task: eng review of the Hold/Sell/Refi design on main.
+ELI10: v1 makes IRES type in each property's loan and rent every time they run a report. Storing each property once (with CSV import) was deliberately deferred until IRES uses v1 regularly. Right now that deferral lives only in the design doc; a TODO makes sure it resurfaces.
+Stakes if we pick wrong: the re-typing friction gets forgotten until IRES complains about it at portfolio scale.
+Recommendation: A because it's an explicitly deferred next step with a clear trigger, and TODOS.md is where it will be seen.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Add to TODOS.md (recommended)
+  ✅ The deferred step and its trigger (IRES asks for batch) are visible in the backlog
+  ✅ Notes that OwnedAssetInputs names become the table columns, so it's a migration
+  ❌ One more P3 item on the list
+B) Skip
+  ✅ Keeps TODOS.md shorter; the design doc still mentions it
+  ❌ Easy to miss, since nobody rereads design docs
+C) Build it in this PR
+  ✅ No re-typing from day one
+  ❌ Reverses the approved Approach A decision before IRES has used v1
+Net: visible deferred step vs. relying on the doc vs. reopening the approach.
+Header: TODO: assets
+Options:
+A) Add to TODOS.md (recommended)
+New TODO (P3, Reports): OwnedProperty table + CSV import, trigger = IRES running properties regularly or asking for batch. Effort when done: human ~3 weeks / CC ~1 day.
+B) Skip
+Not tracked outside the design doc.
+C) Build it in this PR
+Reopen the approach decision and add Approach B to this PR.
+
+State: approved
+Actual answer: A) Add to TODOS.md (D18, 2026-09-24)
+Accepted scope: TODO added to TODOS.md under ## Reports (P3): OwnedProperty table + CSV import, trigger = IRES running properties regularly or asking for batch.
+History: none
+
+Approval readiness: PASS. Checked R1 (D2), R2 (D3), R3 (D4), R4 (D5), R5 (D6), R6 (D7), R7 (D8), R8 (D9), R9 (D10), R10 (D11), R11 (D12), R12 (D13), R13 (D14), R14 (D15), T1 (D16), T2 (D17), T3 (D18); scope D1. R2-2 carried as required proof of R3; R2-13 carried as required proof of the approved JSON contract (below); R2-11 path column fixed as a factual correction.
+
+### Carried-forward required proof (no separate approval needed)
+- **R2-13 (JSON contract):** the fenced block's `hold`, `sell`, `refi` and `assumptions` values are exactly the dicts returned by `hold_projection()`, `sell_now()`, `cash_out_refi()` (including the R2 refi projection) and the assumptions builder. Tests: emitted block equals calc output for a fixture; index.html falls back to the markdown table when the block fails to parse (manual check); Excel sheet built from the block (manual check on first IRES report).
+- **Scope finding 2:** `FakeAnthropicClient` in `tests/conftest.py` (approved in D1 file list and R14).
+
+## Review Sections
+
+### 1. Architecture review
+- [P1] (8/10) Estimate-call placement and 300 s budget → R4, approved inside the stream with a 60 s timeout.
+- [P2] (9/10) Failed refunded runs still count toward daily_limit → R6, approved row deletion on refund.
+- [P2] (9/10) web/server.py:1120 public tenant endpoint would expose the entitlement → R12, approved /api/me.
+- [P2] (8/10) Tenant-admin emails and raw JSON block in email → R13, approved admin-only with fence stripped.
+
+Security: the entitlement gate is server-side (403); owner data is never sent to the founder/sponsor inboxes; the entitlement is not publicly visible. Pre-existing public-endpoint leak → T1 TODO.
+
+```
+POST /analyze (analysis_type=hold)
+  |
+  |- Pydantic: OwnedAssetInputs presence + bounds (R7) --fail--> 422 (no debit)
+  |- entitlement: tenant.asset_analysis_enabled or superadmin --no--> 403
+  |- balance >= REPORT_TOKEN_COST['hold'] (3) or superadmin --no--> 402
+  |- daily_limit (counts 1) --hit--> 429
+  |- write Analysis + BuyerLead; debited = 3 (0 superadmin)
+  v
+stream_response()
+  |- yield {"status":"estimating"}            (skipped if both overrides given)
+  |- ESTIMATE call (60 s, 1500 tok, web search) -> JSON
+  |     `- bad/missing value or rate not in [2,15] (R5), timeout --> refund(debited) + delete rows (R6) + error event
+  |- owned_asset.py: sell_now -> hold_projection (R1 basis, R8 NOI, R9 balloon, R10 exit) -> cash_out_refi (+R2 projection)
+  |     `- irr() -> (None, reason) when undefined (R11)
+  |- yield fenced JSON block + markdown table
+  |- NARRATIVE call (streamed, MAX_TOKENS, web search)
+  |     |- raises before first text --> refund(debited) + delete rows + error event (R3)
+  |     `- raises after text --> error event, no refund
+  |- store report_text (fence kept)
+  `- email active tenant admins, fence stripped (R13); no sponsor / REPORT_NOTIFICATION_EMAIL
+```
+
+### 2. Code quality review
+- [P1] (9/10) Hold IRR basis contradicted its rationale → R1 (net proceeds).
+- [P1] (8/10) Refi not comparable to Hold → R2 (refi-then-hold projection).
+- [P1] (9/10) Refund trigger ambiguous; superadmin refund bug → R3.
+- [P2] (8/10) Estimate validation only covered value → R5.
+- [P2] (8/10) No range validation → R7.
+- [P1] (8/10) NOI ignored vacancy/reserves → R8.
+- [P2] (8/10) No loan maturity → R9.
+- [P3] (9/10) Inputs Path(s) column wrong; exit penalty unspecified → R10.
+- [P1] (9/10) Underwater/undefined IRR → R11.
+
+Shared code: considered reusing the `DELETE /api/analyses/{id}` row-deletion code (server.py:1171-1180) for the R6 refund path. Rejected as an extraction: it is two lines (the BuyerLead and Analysis deletes) under a different auth context; a helper would not save lines or improve reliability.
+
+Inline diagram: add a short ASCII flow comment at the top of `web/owned_asset.py` showing the sell_now → hold_projection → cash_out_refi dependencies.
+
+### 3. Test review
+Framework: pytest (tests/conftest.py, in-memory SQLite, FakeStripeClient). No `## Testing` section in CLAUDE.md.
+
+```
+CODE PATHS (all proposed)                                USER FLOWS
+[+] web/owned_asset.py                                   [+] Entitled IRES user runs Hold report
+  |- amortize()                                            |- [PLANNED ***] no overrides -> estimating -> table -> narrative [->E2E manual]
+  |   |- [PLANNED ***] fixed-rate balance                  |- [PLANNED ** ] both overrides -> no estimate call
+  |   |- [PLANNED ***] interest-only (months=0)            |- [PLANNED ***] reopen saved report re-renders table
+  |   `- [PLANNED ** ] zero balance                        `- [PLANNED *  ] Excel + PDF export (manual check)
+  |- sell_now()  [PLANNED ***] net proceeds w/ penalty   [+] Error states the user sees
+  |- hold_projection()                                     |- [PLANNED ***] 422 missing/out-of-range field, no charge
+  |   |- [PLANNED ***] R1 basis -> known IRR               |- [PLANNED ***] 403 not entitled / 402 low balance
+  |   |- [PLANNED ***] R8 NOI w/ vacancy+reserve           |- [PLANNED ***] estimate fails -> names override, refunded
+  |   |- [PLANNED ***] R9 balloon yr 3 of 5; after horizon |- [PLANNED ***] narrative fails pre-text -> refunded
+  |   `- [PLANNED ***] R10 exit excludes penalty           `- [PLANNED ** ] narrative fails mid-text -> not refunded
+  |- cash_out_refi()  [PLANNED ***] R2 IRR; negative cash out
+  `- irr()  [PLANNED ***] converge; underwater; no sign change (R11)
+[+] web/server.py /analyze (hold)
+  |- [PLANNED ***] validation/403/402/429 order, no debit before 422
+  |- [PLANNED ***] debit 3; superadmin 0; refund only debited (R3/R2-2)
+  |- [PLANNED ***] status event first; estimate timeout -> refund (R4)
+  |- [PLANNED ***] rows deleted on refund, daily count unchanged (R6)
+  |- [PLANNED ***] tax guard: no estimate_property_tax for Hold/Refi
+  |- [PLANNED ** ] JSON block == calc output (R2-13)
+  `- [PLANNED ***] emails: admins only, fence stripped; stored text keeps fence (R13)
+[+] web/server.py /api/me  [PLANNED **] entitlement fields; public endpoint lacks them (R12)
+[+] web/server.py PUT /api/super/tenants  [PLANNED **] flag round-trip
+[+] REGRESSION (CRITICAL, R14): existing 12 types
+  `- [PLANNED ***] 1-token debit x12, 402, superadmin, 429, rows, emails, no refund; written BEFORE the edit
+
+LLM integration: [GAP] [->EVAL] HOLD_ESTIMATE_SYSTEM / HOLD_SYSTEM prompts. No eval suite exists in this repo
+(CLAUDE.md lists no prompt eval patterns); v1 relies on the manual check of the first 5 IRES reports.
+
+COVERAGE (planned): code paths 20/20 planned | user flows 9/10 planned (Excel/PDF manual)
+QUALITY: ***:21 **:7 *:1 | GAPS: 1 (eval, no suite)
+Legend: *** behavior + edge + error | ** happy path | * smoke check | [->E2E] integration | [->EVAL] LLM eval
+```
+
+Test Plan Artifact: ~/.gstack/projects/chrisgarner001-realestate-analyzer/chris-main-eng-review-test-plan-20260924-090203.md
+
+### 4. Performance review
+- [P2] (6/10, medium confidence: verify, latency not measured) The estimate call adds up to 60 s before the narrative, inside the 300 s Vercel limit. Covered by R4's verification step: time one existing report in production before launch. No N+1 or memory concerns: one tenant read, a few row writes, pure-Python math over at most 30 years.
+
+## NOT in scope
+- Owned-asset records / CSV import / batch runs (Approach B): deferred to the T3 TODO until IRES uses v1 regularly.
+- Refunds for the 12 existing report types: T2 TODO; R14 pins current behavior.
+- Public tenant endpoint leak fix: T1 TODO; unrelated to this feature.
+- ARMs, multiple liens, yield-maintenance formulas: out of v1 loan scope (design doc).
+- LLM eval suite for the new prompts: none exists in the repo; manual check of the first 5 reports instead.
+- Self-serve Stripe unlock for the module: premise 3, after a second buyer.
+
+## What already exists
+- `/analyze` dispatch, `SYSTEM_PROMPTS`, `WEB_SEARCH_TYPES`, token debit, daily limit, Analysis/BuyerLead logging, report emails (web/server.py:1808-1935): reused and extended.
+- `Tenant.tier` flag pattern (web/database.py:82): reused for `asset_analysis_enabled`.
+- `PUT /api/super/tenants/{id}` (server.py:1713) and `/api/me` (server.py:1073): extended.
+- `exportExcel()` / html2pdf export (web/index.html:1630-1725): extended with a Hold-Sell-Refi sheet and section.
+- pytest harness with in-memory SQLite and FakeStripeClient (tests/conftest.py): extended with FakeAnthropicClient.
+- `property_tax.estimate_property_tax`: reused only for the Sell buyer-side note.
+- Rebuilt: nothing. New: `web/owned_asset.py` (no numpy; stdlib bisection IRR).
+
+## Failure modes
+| New path | Realistic failure | Handling / test | User sees |
+|---|---|---|---|
+| Estimate call | Web search slow or times out | 60 s timeout → refund + rows deleted (R4/R6), tested | Clear error naming the override to enter |
+| Estimate JSON | Model returns prose or a 0.5% rate | Per-field validation → refund (R5), tested | Clear error |
+| Narrative call | API overload before any text | Refund (R3), tested | Clear error, tokens back |
+| Narrative call | Dies mid-stream | Error event, no refund (R3), tested | Partial report + error |
+| Vercel 300 s kill | Estimate + long narrative exceed the limit | R4 timed-run verification; no in-code handling for a hard kill | Stream cuts off; no refund (verify before launch) |
+| IRR solver | Underwater / no convergence | (None, reason) (R11), tested | "IRR not meaningful" + reason |
+| Cost table | Wrong cost for an existing type | R14 parametrized regression, tested | n/a (caught by tests) |
+| Emails | Owner data sent to founder inbox | Hold skips sponsor/REPORT_NOTIFICATION_EMAIL (R13), tested | n/a |
+
+Critical gaps (no test AND no handling AND silent): 0. The Vercel hard-kill row is not silent (the stream visibly stops) and has a pre-launch verification step.
+
+## Worktree parallelization strategy
+| Step | Modules touched | Depends on |
+|------|----------------|------------|
+| S1 Regression harness (FakeAnthropicClient + R14 tests) | tests/ | — |
+| S2 Calc module + unit tests | web/ (new owned_asset module), tests/ | — |
+| S3 Server wiring (/analyze hold, /api/me, super PUT, DB column) | web/ (server, database) | S1, S2 |
+| S4 UI + export + super toggle | web/ (index, super pages) | S3 |
+
+Lane A: S1 → S3 → S4. Lane B: S2 (independent pure module). Launch A (S1) + B together; merge both; then S3; then S4.
+Conflict flags: S1 and S2 both add files under tests/ (different files, low risk). The uncommitted solo-signup changes in web/server.py, web/database.py and web/index.html must be landed or branched first.
+
+## Implementation Tasks
+Synthesized from this review's findings. Each task derives from a specific finding above. Run with Claude Code or Codex; checkbox as you ship.
+
+- [ ] **T1 (P1, human: ~3h / CC: ~20min)** — tests — Pin existing /analyze behavior before editing it
+  - Surfaced by: Test review — R14 regression contract (D15)
+  - Files: tests/conftest.py, tests/test_analyze_hold.py
+  - Verify: `pytest tests/test_analyze_hold.py -k Regression` passes on current main before any /analyze change
+- [ ] **T2 (P1, human: ~1 day / CC: ~45min)** — calc — Build web/owned_asset.py: amortize, sell_now, hold_projection (R1, R8, R9, R10), cash_out_refi (+R2 projection), irr (R11), OwnedAssetInputs with bounds (R7)
+  - Surfaced by: Code quality — R1, R2, R7-R11
+  - Files: web/owned_asset.py, tests/test_owned_asset.py
+  - Verify: `pytest tests/test_owned_asset.py`
+- [ ] **T3 (P1, human: ~1 day / CC: ~45min)** — server — Wire hold into /analyze: validation → 403 → cost 3 → rows; estimate call inside the stream (R4) with per-field validation (R5); refund-unless-narrative-started + row deletion (R3, R6); JSON block; admin-only emails with fence stripped (R13); tax guard
+  - Surfaced by: Architecture — R3-R6, R13; carried R2-13
+  - Files: web/server.py, web/database.py
+  - Verify: `pytest tests/test_analyze_hold.py`
+- [ ] **T4 (P2, human: ~30min / CC: ~5min)** — server — Expose asset_analysis_enabled + hold_token_cost on /api/me; accept the flag in the super tenant PUT
+  - Surfaced by: Architecture — R12
+  - Files: web/server.py
+  - Verify: `pytest tests/test_analyze_hold.py -k "me or super"`
+- [ ] **T5 (P2, human: ~1 day / CC: ~40min)** — UI — Hold option (entitled only, shows "3 tokens"), owner intake form with defaults, estimating status, table render from the JSON block with markdown fallback, Excel sheet, PDF section, super.html toggle
+  - Surfaced by: Recommended Approach steps 4-6; R12, R13, R2-13
+  - Files: web/index.html, web/super.html
+  - Verify: manual run as an entitled test tenant; export Excel and PDF
+- [ ] **T6 (P2, human: ~30min / CC: n/a)** — perf — Time one existing full report in production to confirm headroom under 300 s
+  - Surfaced by: Performance — R4 verification
+  - Files: none
+  - Verify: recorded duration under ~240 s
+
+JSONL task artifact: not written (jq is not installed on this machine; install jq for /autoplan aggregation).
+
+## Unresolved decisions
+None.
+
+## Completion summary
+- Step 0: Scope Challenge — scope accepted as-is (D1, original arrangement)
+- Architecture Review: 4 issues found
+- Code Quality Review: 9 issues found
+- Test Review: diagram produced, 1 gap identified (LLM eval, no suite); R14 regression contract added
+- Performance Review: 1 issue found (latency verification)
+- NOT in scope: written
+- What already exists: written
+- TODOS.md updates: 3 items proposed to user (3 added)
+- Failure modes: 0 critical gaps flagged
+- Unresolved decisions: 0 in this review
+- Outside voice: codex, unavailable (not authenticated; native fallback needs TaskOutput, not available in this session)
+- Parallelization: 2 lanes, 2 parallel / 2 sequential
+- Lake Score: 8/8 = 10/10 choices / answered coverage choices (R2, R3, R5, R7, R8, R9, R11, R14)
+
+## Suppressed findings
+None (no findings below confidence 5).
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Outside Review | codex via `/plan-eng-review` | Independent 2nd opinion | 1 | unavailable | none (not authenticated; native fallback unavailable) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 6 | ISSUES OPEN (PLAN) | 14 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | stale (2026-09-09, other plan) | score: 2/10 → 8/10, 9 decisions |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **OUTSIDE COVERAGE:** codex, plan-review phase, unavailable (codex not authenticated; the Claude-subagent fallback needs TaskOutput, which this session lacks). No outside findings.
+- **VERDICT:** No reviews CLEAR for this plan. All 14 findings have approved remedies; status stays ISSUES OPEN because issues were found. eng review required
+
+NO UNRESOLVED DECISIONS
