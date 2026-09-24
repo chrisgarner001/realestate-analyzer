@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import asdict, fields as dc_fields
+from dataclasses import asdict, fields as dc_fields, replace
 from datetime import datetime, timedelta, date
 from typing import Optional
 
@@ -39,7 +39,8 @@ STATEMENT_RETENTION = timedelta(hours=24)
 STALE_STATEMENT_DAYS = 60
 MAX_STATEMENT_BYTES = 4 * 1024 * 1024       # Vercel request body limit is 4.5 MB
 MAX_STATEMENTS_PER_BATCH = 100
-ESTIMATE_TIMEOUT_S = 60
+ESTIMATE_TIMEOUT_S = 150                    # comps + rent + market research; fits the 300 s function limit
+STATEMENT_TIMEOUT_S = 60
 FINAL_STATUSES = {"done", "failed_refunded", "failed_charged", "skipped_pending", "excluded"}
 RUNNABLE_STATUSES = ("queued", "failed_refunded", "failed_charged")
 
@@ -115,6 +116,13 @@ def _assumptions(batch: OwnedBatch, tenant: Optional[Tenant]) -> owned_asset.Ass
     return owned_asset.Assumptions(**kwargs)
 
 
+def _row_assumptions(a: owned_asset.Assumptions, row: OwnedBatchRow) -> owned_asset.Assumptions:
+    """Batch assumptions plus this property's own land-contract terms, if the owner edited them."""
+    terms = (_j(row.overrides, {}) or {}).get("_lc_terms") or {}
+    changes = {k: v for k, v in terms.items() if k in LC_TERM_FIELDS and v is not None}
+    return replace(a, **changes) if changes else a
+
+
 def _assumptions_hash(a: owned_asset.Assumptions) -> str:
     return hashlib.sha256(_dump(asdict(a)).encode()).hexdigest()[:16]
 
@@ -152,6 +160,9 @@ OVERRIDE_BOUNDS = {
 def _validate_overrides(data: dict) -> dict:
     clean = {}
     for k, v in data.items():
+        if k.startswith("_"):              # internal keys (e.g. _lc_terms) are set by their own endpoints
+            clean[k] = v
+            continue
         if k not in OVERRIDE_BOUNDS:
             raise HTTPException(422, f"Unknown field: {k}")
         if v in (None, ""):
@@ -183,7 +194,7 @@ def _property_inputs(db: Session, row: OwnedBatchRow, estimates: Optional[dict])
     sources = base.pop("sources")
     overrides = _j(row.overrides, {}) or {}
     for k, v in overrides.items():
-        if v is None:
+        if v is None or k.startswith("_"):
             continue
         key = {"loan_rate_pct": "loan_rate_pct"}.get(k, k)
         base[key] = v
@@ -213,11 +224,24 @@ def _property_inputs(db: Session, row: OwnedBatchRow, estimates: Optional[dict])
         sources["rehab_budget_detail"] = "estimated from notes, age and size"
     kwargs = {k: v for k, v in base.items() if k in {f.name for f in dc_fields(owned_asset.PropertyInputs)}}
     kwargs["stale_loan_statement"] = stale
+    kwargs["months_vacant"] = _months_since(fields.get("vacant_since"))
     kwargs["sources"] = sources
     for k in ("dom_as_is_days", "dom_renovated_days", "year_built"):
         if kwargs.get(k) is not None:
             kwargs[k] = int(kwargs[k])
     return owned_asset.PropertyInputs(**kwargs)
+
+
+def _months_since(value) -> Optional[float]:
+    """Months from the vacant date to today (kept live, so a re-run next month counts the extra month)."""
+    if not value:
+        return None
+    try:
+        d = value if isinstance(value, date) else datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    days = (date.today() - d).days
+    return round(max(0, days) / 30.44, 1)
 
 
 def _needs_estimate(row: OwnedBatchRow) -> bool:
@@ -251,25 +275,63 @@ Return ONLY a JSON object, no other text:
  "county": "<county name without the word County, or null>", "school_district": "<name or null>",
  "beds": <number or null>, "baths": <number or null>, "sqft": <number or null>, "year_built": <number or null>,
  "sources": {"as_is_value": "...", "arv": "...", "market_rent": "...", "appreciation_pct": "...", "facts": "..."},
- "comps": [{"address": "...", "price": <number>, "date": "YYYY-MM-DD", "condition": "..."}]}
-Never invent data. If a value cannot be found, use null. Be conservative: lean toward lower prices and longer timelines."""
+ "sale_comps": [{"address": "...", "sale_price": <number>, "beds": <n>, "baths": <n>, "sqft": <n>,
+                 "condition": "as-is|renovated|average", "distance": "0.4 mi", "sale_date": "YYYY-MM-DD",
+                 "source": "Redfin|Zillow|Realtor.com|county", "used_for": "as-is value|ARV",
+                 "selection_rationale": "...", "adjustments": "..."}],
+ "rental_comps": [{"address": "...", "neighborhood": "...", "monthly_rent": <number>, "beds": <n>, "baths": <n>,
+                   "sqft": <n>, "distance": "0.6 mi", "listed_or_leased_date": "YYYY-MM-DD", "status": "listed|leased",
+                   "condition_features": "...", "source": "..."}],
+ "comp_search": {"sale_radius": "0.5 mi", "sale_window_days": 180, "rental_radius": "1 mi", "confidence": "High|Moderate|Low",
+                 "notes": "any expanded radius, older comps or mismatches"},
+ "market": {"classification": "Buyer's market|Seller's market|Balanced", "median_sale_price": <number or null>,
+            "price_trend_yoy_pct": <number or null>, "days_on_market": <number or null>,
+            "months_of_inventory": <number or null>, "rent_trend_yoy_pct": <number or null>,
+            "vacancy_rate_pct": <number or null>, "drivers": ["..."], "outlook_12mo": "one or two sentences"}}
+Give 4-6 sale comps (both as-is and renovated where possible) and 3-5 rental comps. Never invent data. If a value cannot be found, use null. Be conservative: lean toward lower prices and longer timelines."""
 
 RATIONALE_SYSTEM = """You are a direct, specific real estate analyst writing for an asset manager.
 Write 3 to 5 sentences explaining the recommended exit for this property, using ONLY the numbers provided.
 Never compute, change, or introduce new numbers. Name the recommended exit and its advantage over the runner-up,
 the main driver, and the key risk. No headings, no process narration, no hype."""
 
-WRITEUP_SYSTEM = """You are the PropYield Exit Strategy Analyzer, a senior real estate investment analyst.
-Write the report_markdown for ONE owned property from the analysis_json provided. All numbers come from
-analysis_json: never compute or change them. Sections, in order:
-1. Recommendation: one bold sentence with the strategy and its advantage over the runner-up.
-2. Why this wins: 3-5 bullets, each citing specific numbers from analysis_json.
-3. What would change the answer: the break-even triggers in plain English.
-4. Stress test summary: which strategy holds up best in the combined downside.
-5. Risks & flags: data gaps, compliance and tax items (capital gains, depreciation recapture, installment sale, 1031 as CPA considerations).
-6. Assumptions used: note which DEFAULT assumptions the analysis relied on.
+WRITEUP_SYSTEM = """You are the PropYield Exit Strategy Analyzer, a senior real estate investment analyst writing
+for the asset manager who owns this property. The four-exit numbers, comps tables, market figures, land contract
+terms and holding costs are already shown to the reader from analysis_json and research. Your job is the narrative.
+
+Use web_search for the neighborhood section. Never compute, change or introduce financial numbers for the exits:
+quote them from analysis_json. Write these markdown sections, in order, with these exact headings:
+
+## Recommendation
+One bold sentence naming the exit and its advantage over the runner-up, then 3-5 bullets with the reasoning,
+each tied to a specific number (net cash, time to cash, cash needed, risk, stress results).
+
+## What would change the answer
+The break-even triggers in plain English, plus what the owner should verify first.
+
+## Neighborhood Quality
+### Schools
+Elementary/middle/high ratings and names.
+### Safety & Crime
+Crime rate vs the national and city average.
+### Walk Score
+Walkability and access to amenities.
+### Demographics
+Median household income, owner vs renter share, population trend.
+### Top Employers
+Top employers within 15 miles.
+End with one sentence on what the neighborhood means for resale, renting and a land-contract buyer.
+
+## Market Conditions
+Interpret the market figures provided (trend, days on market, inventory, rent trend) and the 12-month outlook,
+and say which exit the market favors.
+
+## Next Steps
+3-6 numbered, concrete actions for the owner this month (e.g., get a second rehab bid, request a payoff letter).
+
+Do not write a financing or mortgage section. Do not discuss property tax estimates when the owner entered the tax.
 End with: "This analysis is an investment model, not legal or tax advice. Confirm the tax impact with your CPA and land contract terms with a Michigan real estate attorney."
-Output only the final report. No process narration. Tone: trusted analyst, direct, no hype."""
+Output only the report. No process narration. Tone: trusted analyst, direct, no hype."""
 
 STATEMENT_SYSTEM = """You read one mortgage/loan statement. Return ONLY a JSON object:
 {"is_loan_statement": true|false,
@@ -327,13 +389,15 @@ def _estimate(row: OwnedBatchRow) -> dict:
               f"Notes: {(fields.get('notes') or '')[:800]}\n"
               f"Known overrides: {json.dumps(ov)}")
     client = s.get_client()
-    resp = client.messages.create(model=s.MODEL, max_tokens=1500, system=ESTIMATE_SYSTEM,
+    resp = client.messages.create(model=s.MODEL, max_tokens=6000, system=ESTIMATE_SYSTEM,
                                   messages=[{"role": "user", "content": prompt}],
                                   tools=s.WEB_SEARCH_TOOL, timeout=ESTIMATE_TIMEOUT_S)
     data = _extract_json(_last_text(resp))
     if data is None:
         raise ValueError("estimate response was not JSON")
     out = {"sources": data.get("sources") or {}, "comps": data.get("comps") or [],
+           "sale_comps": data.get("sale_comps") or [], "rental_comps": data.get("rental_comps") or [],
+           "comp_search": data.get("comp_search") or {}, "market": data.get("market") or {},
            "county": data.get("county"), "school_district": data.get("school_district")}
     for k in ("as_is_value", "arv", "market_rent", "dom_as_is_days", "dom_renovated_days", "appreciation_pct",
               "months_of_supply", "rehab_estimate", "beds", "baths", "sqft", "year_built"):
@@ -658,6 +722,7 @@ class SingleRunRequest(BaseModel):
     cost_basis: Optional[float] = Field(None, ge=0, le=5_000_000)
     investor_exposure: Optional[float] = Field(None, ge=0, le=5_000_000)
     other_owed_at_sale: Optional[float] = Field(None, ge=0, le=5_000_000)
+    date_vacant: Optional[date] = None
     arv: Optional[float] = Field(None, gt=0, le=10_000_000)
     notes: Optional[str] = Field(None, max_length=4000)
 
@@ -677,6 +742,7 @@ def _single_fields(req: SingleRunRequest) -> dict:
             "investor_payback": payback if exposure_given else None,
             "investor_exposure": req.investor_exposure, "other_owed_at_sale": req.other_owed_at_sale,
             "cost_basis": req.cost_basis, "notes": req.notes,
+            "vacant_since": req.date_vacant.isoformat() if req.date_vacant else None,
             "lc_forfeiture_history": bool(owned_import.FORFEITURE_RE.search(req.notes or ""))}
 
 
@@ -844,7 +910,7 @@ def _run_stream(batch_id: int, row_id: int):
         # 2. Compute (pure Python).
         yield _sse({"status": "computing"})
         try:
-            analysis = owned_asset.analyze(_property_inputs(db, row, est), a)
+            analysis = owned_asset.analyze(_property_inputs(db, row, est), _row_assumptions(a, row))
         except owned_asset.MissingInputError as e:
             yield _fail(db, row, f"{e}. Tokens refunded.", True)
             return
@@ -895,10 +961,54 @@ async def recalculate(batch_id: int, user: User = Depends(require_owned_access),
     n = 0
     for row in batch.rows:
         if row.status == "done":
-            row.analysis = _dump(owned_asset.analyze(_property_inputs(db, row, _j(row.estimates) or {}), a))
+            row.analysis = _dump(owned_asset.analyze(_property_inputs(db, row, _j(row.estimates) or {}),
+                                                     _row_assumptions(a, row)))
             n += 1
     db.commit()
     return {"recalculated": n, **_batch_json(db, batch, user)}
+
+
+LC_TERM_FIELDS = {"lc_price_premium_pct", "lc_down_pct", "lc_rate_pct", "lc_amort_years", "lc_default_prob_pct"}
+
+
+class LcTermsRequest(BaseModel):
+    """Editable Land Contract Sale card. Price is absolute; stored as a premium over this property's ARV."""
+    sale_price: Optional[float] = Field(None, gt=0, le=10_000_000)
+    down_pct: Optional[float] = Field(None, ge=0, le=50)
+    rate_pct: Optional[float] = Field(None, ge=0, le=20)
+    term_years: Optional[int] = Field(None, ge=1, le=40)
+    default_prob_pct: Optional[float] = Field(None, ge=0, le=60)
+    reset: bool = False
+
+
+@router.post("/api/owned/batches/{batch_id}/rows/{row_id}/lc-terms")
+async def set_lc_terms(batch_id: int, row_id: int, req: LcTermsRequest,
+                       user: User = Depends(require_owned_access), db: Session = Depends(get_db)):
+    """Free: store this property's land-contract terms and rerun the four-exit comparison."""
+    batch = _get_batch(db, batch_id, user)
+    row = _get_row(db, batch, row_id)
+    if row.status != "done" or not row.analysis:
+        raise HTTPException(409, "Run the analysis first")
+    overrides = _j(row.overrides, {}) or {}
+    terms = {} if req.reset else dict(overrides.get("_lc_terms") or {})
+    if not req.reset:
+        if req.sale_price is not None:
+            arv = next((x["value"] for x in _j(row.analysis, {}).get("assumptions", []) if x["name"] == "arv"), None)
+            if not arv:
+                raise HTTPException(409, "No after-repair value to price the land contract against")
+            terms["lc_price_premium_pct"] = round((req.sale_price / arv - 1) * 100.0, 4)
+        for src, dst in (("down_pct", "lc_down_pct"), ("rate_pct", "lc_rate_pct"),
+                         ("term_years", "lc_amort_years"), ("default_prob_pct", "lc_default_prob_pct")):
+            if getattr(req, src) is not None:
+                terms[dst] = getattr(req, src)
+    overrides["_lc_terms"] = terms
+    row.overrides = _dump(overrides)
+    tenant = db.query(Tenant).filter_by(id=batch.tenant_id).first() if batch.tenant_id else None
+    a = _assumptions(batch, tenant)
+    row.analysis = _dump(owned_asset.analyze(_property_inputs(db, row, _j(row.estimates) or {}),
+                                             _row_assumptions(a, row)))
+    db.commit()
+    return _row_json(row, _assumptions_hash(a))
 
 
 @router.post("/api/owned/batches/{batch_id}/rows/{row_id}/writeup")
@@ -929,6 +1039,12 @@ def _writeup_stream(row_id: int):
         slim = {k: v for k, v in analysis.items() if k != "assumptions"}
         for sc in slim.get("scenarios", []):
             sc.pop("monthly_cash_flows", None)
+        est = _j(row.estimates, {}) or {}
+        fields = _j(row.inputs, {}) or {}
+        slim["research"] = {"market": est.get("market"), "comp_search": est.get("comp_search"),
+                            "county": est.get("county"), "school_district": est.get("school_district"),
+                            "address": fields.get("full_address") or f"{fields.get('address_line')}, {fields.get('city')}",
+                            "owner_entered_tax": fields.get("annual_tax") is not None}
         parts = []
         try:
             client = s.get_client()
@@ -976,7 +1092,7 @@ def _extract_statement(data: bytes, media_type: str) -> dict:
     client = s.get_client()
     resp = client.messages.create(model=s.MODEL, max_tokens=1000, system=STATEMENT_SYSTEM,
                                   messages=[{"role": "user", "content": [block, {"type": "text", "text": "Extract."}]}],
-                                  timeout=ESTIMATE_TIMEOUT_S)
+                                  timeout=STATEMENT_TIMEOUT_S)
     data_json = _extract_json(_last_text(resp))
     if data_json is None:
         raise ValueError("not JSON")

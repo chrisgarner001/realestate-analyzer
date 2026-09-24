@@ -137,6 +137,7 @@ class PropertyInputs:
     cost_basis: Optional[float] = None
     lc_forfeiture_history: bool = False
     stale_loan_statement: bool = False
+    months_vacant: Optional[float] = None           # since the vacant date; carry since then joins cost basis
     # Source tag per input: USER | DATA | DEFAULT (with optional detail)
     sources: dict = field(default_factory=dict)
 
@@ -403,6 +404,16 @@ def _financing(r: Resolved, outlays: dict[int, float], end_month: int) -> tuple[
 
 # ── scenario models ─────────────────────────────────────────────────────────
 
+def _waterfall(items: list, net: float, gap_label: str = "Timing and rounding") -> list[dict]:
+    """Readable line items for the report; the last line always equals Net Profit."""
+    rows = [{"label": label, "amount": round(amount, 2)} for label, amount in items if abs(amount) >= 0.5]
+    gap = net - sum(amount for _, amount in items)
+    if abs(gap) >= 1.0:
+        rows.append({"label": gap_label, "amount": round(gap, 2)})
+    rows.append({"label": "Net cash to you", "amount": round(net, 2), "total": True})
+    return rows
+
+
 @dataclass
 class Scenario:
     strategy: str
@@ -421,13 +432,23 @@ def sell_as_is(r: Resolved) -> Scenario:
     t = min(r.vacate_months + r.dom_as_is_months + 1, r.a.horizon_months)
     if r.cash_for_keys:
         flows[1] -= r.cash_for_keys
+    carry_total = 0.0
     for m in range(1, t + 1):
         pay = loan.step()
-        flows[m] -= _vacant_carry(r, m, pay) - _occupied_offset(r, m)
-    net_sale = r.as_is_value - _as_is_selling_costs(r, r.as_is_value) - loan.balance - r.p.investor_payback
+        carry = _vacant_carry(r, m, pay) - _occupied_offset(r, m)
+        carry_total += carry
+        flows[m] -= carry
+    selling = _as_is_selling_costs(r, r.as_is_value)
+    net_sale = r.as_is_value - selling - loan.balance - r.p.investor_payback
     flows[t] += net_sale
+    wf = _waterfall([("Sale price (as-is)", r.as_is_value), ("Commission + closing", -selling),
+                     ("Cash for keys", -r.cash_for_keys),
+                     (f"Holding costs until sold ({t} mo, incl. loan payments)", -carry_total),
+                     ("Loan payoff at sale", -loan.balance), ("Investor payback", -r.p.investor_payback)],
+                    sum(flows))
     return Scenario("sell_as_is", flows, list(flows), t,
-                    shortfall=max(0.0, -net_sale), extras={"sale_month": t, "net_sale": net_sale})
+                    shortfall=max(0.0, -net_sale),
+                    extras={"sale_month": t, "net_sale": net_sale, "carry_total": carry_total, "waterfall": wf})
 
 
 def rehab_sell(r: Resolved, starting_equity: float) -> Scenario:
@@ -451,9 +472,17 @@ def rehab_sell(r: Resolved, starting_equity: float) -> Scenario:
     profit_flows[t] -= fin_total
     for m, v in npv_adj.items():
         flows[m] += v
+    selling = _retail_selling_costs(r, r.arv)
+    wf = _waterfall([("Sale price (after rehab)", r.arv), ("Commission, closing + concessions", -selling),
+                     (f"Rehab incl. {r.contingency_pct:g}% contingency", -r.rehab_total),
+                     ("Cash for keys", -r.cash_for_keys),
+                     (f"Holding costs until sold ({t} mo, incl. loan payments)", -carry_total),
+                     ("Cost of capital on rehab", -fin_total),
+                     ("Loan payoff at sale", -loan.balance), ("Investor payback", -r.p.investor_payback)],
+                    sum(profit_flows))
     s = Scenario("rehab_sell", flows, profit_flows, t, shortfall=max(0.0, -net_sale),
                  extras={"sale_month": t, "net_sale": net_sale, "financing_cost": fin_total,
-                         "carry_total": carry_total})
+                         "carry_total": carry_total, "waterfall": wf})
     # Spec override: profit after all costs < 10% of rehab + carry invested.
     gain = sum(profit_flows) - starting_equity
     invested = r.rehab_total + carry_total
@@ -480,9 +509,11 @@ def rehab_rent(r: Resolved, starting_equity: float, stress: Optional[dict] = Non
     year1_noi = year1_debt = year1_gross = year1_opex = 0.0
     op_months = 0
     min_cf = None
+    pre_carry = rental_cf = 0.0
     for m in range(1, h + 1):
         pay = loan.step()
         if m < lease_start:
+            pre_carry += _vacant_carry(r, m, pay) - _occupied_offset(r, m)
             flows[m] -= _vacant_carry(r, m, pay) - _occupied_offset(r, m) + outlays.get(m, 0.0)
             continue
         ops_month = m - lease_start          # 0-based month of operation
@@ -499,6 +530,7 @@ def rehab_rent(r: Resolved, starting_equity: float, stress: Optional[dict] = Non
             opex += stress.get("major_repair_cost", 0.0)
         noi = collected - opex
         cf = noi - pay
+        rental_cf += cf
         flows[m] += cf
         if op_months < 12:
             year1_noi += noi
@@ -515,6 +547,15 @@ def rehab_rent(r: Resolved, starting_equity: float, stress: Optional[dict] = Non
     fin_total, npv_adj = _financing(r, outlays, lease_start)
     profit_flows = list(flows)
     profit_flows[h] -= fin_total
+    rent_wf = _waterfall([(f"Rehab incl. {r.contingency_pct:g}% contingency", -r.rehab_total),
+                          ("Cash for keys", -r.cash_for_keys),
+                          (f"Holding costs until leased ({lease_start - 1} mo)", -pre_carry),
+                          ("Cost of capital on rehab", -fin_total),
+                          (f"Rental cash flow after expenses and loan ({h - lease_start + 1} mo)", rental_cf),
+                          (f"Assumed sale at month {h}", terminal_price),
+                          ("Commission, closing + concessions", -_retail_selling_costs(r, terminal_price)),
+                          ("Loan payoff at sale", -loan.balance), ("Investor payback", -r.p.investor_payback)],
+                         sum(profit_flows))
     for m, v in npv_adj.items():
         flows[m] += v
     dscr = (year1_noi / year1_debt) if year1_debt > 0 else None
@@ -530,6 +571,8 @@ def rehab_rent(r: Resolved, starting_equity: float, stress: Optional[dict] = Non
                      "break_even_occupancy_pct": ((year1_opex + year1_debt) / year1_gross * 100.0) if year1_gross else None,
                      "year1_monthly_cash_flow": year1_cf / op_months if op_months else None,
                      "operating_months_in_year1": op_months,
+                     "market_rent": r.market_rent, "lease_start_month": lease_start,
+                     "waterfall": rent_wf,
                  })
     if dscr is not None and dscr < 1.15:
         s.disqualifier = f"Year-1 DSCR {dscr:.2f} is below 1.15"
@@ -598,8 +641,22 @@ def rehab_land_contract(r: Resolved, stress: Optional[dict] = None) -> Scenario:
     for m, v in npv_adj.items():
         ev[m] += v
     months_paid = h - close
-    interest_earned = pmt * months_paid - (
-        principal - _remaining_principal(principal, a.lc_rate_pct, a.lc_amort_years, months_paid))
+    remaining_h = _remaining_principal(principal, a.lc_rate_pct, a.lc_amort_years, months_paid)
+    interest_earned = pmt * months_paid - (principal - remaining_h)
+    pre_out = -sum(base[1:close + 1]) + closing_cash          # rehab + carry + cash for keys before closing
+    lc_wf = _waterfall([("Down payment at closing", down), ("Closing costs", -price * a.closing_pct / 100.0),
+                        (f"Rehab incl. {r.contingency_pct:g}% contingency", -r.rehab_total),
+                        ("Cash for keys", -r.cash_for_keys),
+                        (f"Holding costs until closing ({close} mo, incl. loan payments)",
+                         -(pre_out - r.rehab_total - r.cash_for_keys)),
+                        ("Cost of capital on rehab", -fin_total),
+                        ("Loan payoff at LC closing", -loan.balance),
+                        (f"Buyer payments collected ({months_paid} mo)", pmt * months_paid),
+                        ("Servicing fees", -a.lc_servicing_monthly * months_paid),
+                        (f"Balloon / note balance at month {h}", remaining_h),
+                        ("Investor payback (at balloon or note sale)", -payback)],
+                       sum(profit_flows),
+                       gap_label=f"Default and note-sale adjustment ({a.lc_default_prob_pct:g}% default, expected)")
     return Scenario("rehab_land_contract", ev, profit_flows, h, liquidity_label="balloon or note sale",
                     shortfall=max(0.0, -closing_cash),
                     extras={
@@ -610,6 +667,15 @@ def rehab_land_contract(r: Resolved, stress: Optional[dict] = None) -> Scenario:
                         "default_npv": npv(dflt, a.discount_rate_pct),
                         "total_interest_earned": interest_earned,
                         "financing_cost": fin_total,
+                        "principal": principal, "rate_pct": a.lc_rate_pct, "amort_years": a.lc_amort_years,
+                        "down_pct": a.lc_down_pct, "price_premium_pct": a.lc_price_premium_pct,
+                        "balloon_month": h, "balloon_balance": remaining_h,
+                        "buyer_monthly_tax": r.annual_tax / 12.0,
+                        "buyer_monthly_insurance": r.annual_insurance / 12.0,
+                        "default_prob_pct": a.lc_default_prob_pct,
+                        "servicer": a.lc_servicer,
+                        "investor_payback": payback,
+                        "waterfall": lc_wf,
                     })
 
 
@@ -854,40 +920,72 @@ def preflight_flags(r: Resolved, scen: dict) -> list[dict]:
     flags = []
     if r.p.occupancy == "occupied":
         flags.append({"type": "risk", "severity": "info",
-                      "message": "Tenant-occupied: sale and rehab paths start after the lease ends or cash-for-keys"})
+                      "message": "Tenant-occupied: sale and rehab paths start after the lease ends or cash-for-keys",
+                      "suggestion": "Confirm the lease end date or offer cash for keys before listing."})
     if r.arv and r.rehab_total > 0.30 * r.arv:
         flags.append({"type": "risk", "severity": "warning",
-                      "message": "Rehab plus contingency exceeds 30% of ARV; double-check scope and ARV"})
+                      "message": "Rehab plus contingency exceeds 30% of ARV; double-check scope and ARV",
+                      "suggestion": "Get a second contractor bid and confirm the ARV with renovated sales before committing."})
     if r.p.loan_payoff > 0:
         flags.append({"type": "risk", "severity": "warning",
-                      "message": "Existing mortgage: a land contract sale may trigger due-on-sale; payoff at LC closing is assumed"})
+                      "message": "Existing mortgage: a land contract sale may trigger due-on-sale; payoff at LC closing is assumed",
+                      "suggestion": "Ask the lender for a written payoff or consent before offering a land contract."})
     if r.a.lc_servicer:
         flags.append({"type": "compliance", "severity": "info",
-                      "message": f"LC servicing and compliance: {r.a.lc_servicer}"})
+                      "message": f"LC servicing and compliance: {r.a.lc_servicer}",
+                      "suggestion": f"Send the buyer file to {r.a.lc_servicer} for ability-to-repay review before signing."})
     else:
         flags.append({"type": "compliance", "severity": "warning",
-                      "message": "Land contract: Compliance Review Required (Dodd-Frank/SAFE Act seller-financing rules)"})
+                      "message": "Land contract: Compliance Review Required (Dodd-Frank/SAFE Act seller-financing rules)",
+                      "suggestion": "Use a licensed servicer and a Michigan real estate attorney before offering land-contract terms."})
     if r.p.lc_forfeiture_history:
         flags.append({"type": "risk", "severity": "warning",
-                      "message": "Prior land contract forfeiture on this property"})
+                      "message": "Prior land contract forfeiture on this property",
+                      "suggestion": "If selling on land contract again, require a larger down payment and stricter buyer screening."})
     if Loan(r.p.loan_payoff, r.p.loan_rate_pct, r.p.loan_pi).negative_amortization:
         flags.append({"type": "data", "severity": "warning",
-                      "message": "Loan P&I is below the monthly interest (negative amortization)"})
+                      "message": "Loan P&I is below the monthly interest (negative amortization)",
+                      "suggestion": "Check the loan statement: the balance is growing each month."})
     if r.sources.get("loan_rate_pct") == "DEFAULT" or r.sources.get("loan_pi") == "DEFAULT":
         flags.append({"type": "data", "severity": "info",
-                      "message": f"Loan rate/payment not entered: assumed {r.p.loan_rate_pct:g}% interest-only (${r.p.loan_pi:,.0f}/mo)"})
+                      "message": f"Loan rate/payment not entered: assumed {r.p.loan_rate_pct:g}% interest-only (${r.p.loan_pi:,.0f}/mo)",
+                      "suggestion": "Enter the real rate and monthly payment from the loan statement for exact holding costs."})
     if r.p.stale_loan_statement:
         flags.append({"type": "data", "severity": "warning",
-                      "message": "Loan payoff comes from a statement more than 60 days old"})
+                      "message": "Loan payoff comes from a statement more than 60 days old",
+                      "suggestion": "Request a current payoff letter before deciding."})
     for k, s in scen.items():
         if s.shortfall > 0:
             flags.append({"type": "risk", "severity": "critical",
-                          "message": f"{STRATEGY_LABELS[k]}: proceeds don't cover loan + investor payback; short ${s.shortfall:,.0f}"})
+                          "message": f"{STRATEGY_LABELS[k]}: proceeds don't cover loan + investor payback; short ${s.shortfall:,.0f}",
+                          "suggestion": "Bring cash to closing, or negotiate the payoff or investor payback down before choosing this exit."})
     for name in ("arv", "market_rent"):
         if r.sources.get(name) == "DEFAULT":
             flags.append({"type": "data", "severity": "warning",
-                          "message": f"No comps for {'ARV' if name == 'arv' else 'market rent'}; a labeled default was used"})
+                          "message": f"No comps for {'ARV' if name == 'arv' else 'market rent'}; a labeled default was used",
+                          "suggestion": "Enter a value from a local agent or recent renovated sales, then recalculate (free)."})
     return flags
+
+
+def vacancy_carry(r: Resolved) -> dict:
+    """Today's monthly holding cost (interest only, no principal) and the total since the vacant date."""
+    p, a = r.p, r.a
+    parts = {
+        "property_tax": r.annual_tax / 12.0,
+        "insurance": r.annual_insurance / 12.0,
+        "utilities": p.utilities_monthly if p.utilities_monthly is not None else a.utilities_vacant_monthly,
+        "maintenance": p.maintenance_monthly if p.maintenance_monthly is not None else a.min_maintenance_monthly,
+        "security": p.security_monthly or 0.0,
+        "other": p.other_holding_monthly or 0.0,
+        "loan_interest": p.loan_payoff * p.loan_rate_pct / 1200.0 if p.loan_payoff else 0.0,
+    }
+    monthly = sum(parts.values())
+    months = p.months_vacant or 0.0
+    return {"months_vacant": p.months_vacant, "monthly_carry": round(monthly, 2),
+            "monthly_breakdown": {k: round(v, 2) for k, v in parts.items()},
+            "carry_since_vacant": round(monthly * months, 2),
+            "cost_basis_entered": p.cost_basis,
+            "cost_basis_adjusted": round(p.cost_basis + monthly * months, 2) if p.cost_basis is not None else None}
 
 
 # ── public entry point ──────────────────────────────────────────────────────
@@ -898,6 +996,8 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
     ev = evaluate(p, a)
     r: Resolved = ev["resolved"]
     decision = rank(ev, a)
+    vacancy = vacancy_carry(r)
+    basis = (p.cost_basis + vacancy["carry_since_vacant"]) if p.cost_basis is not None else None
     scen_objs = {k: v["scenario"] for k, v in ev["scenarios"].items()}
     flags = preflight_flags(r, scen_objs)
     scenarios_json = []
@@ -924,16 +1024,22 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
             "effort": EFFORT[k],
             "annual_cash_flow": annual,
             "stress_tests": item["stress_tests"],
-            "profit_vs_cost_basis": (m["net_profit"] - p.cost_basis) if p.cost_basis is not None else None,
+            "profit_vs_cost_basis": (m["net_profit"] - basis) if basis is not None else None,
             "shortfall": s.shortfall,
             "details": s.extras,
             "monthly_cash_flows": s.flows,
         })
-    if p.cost_basis is not None:
+    if basis is not None:
         win = ev["scenarios"][decision["strategy"]]["metrics"]["net_profit"]
-        if win < p.cost_basis:
+        if win < basis:
             flags.append({"type": "risk", "severity": "warning",
-                          "message": f"Recommended exit returns ${p.cost_basis - win:,.0f} less than cost basis"})
+                          "message": f"Recommended exit returns ${basis - win:,.0f} less than cost basis",
+                          "suggestion": "Review the investor payback and loan terms; a loss against basis may need partner sign-off."})
+    if vacancy["months_vacant"] and vacancy["months_vacant"] > 6:
+        flags.append({"type": "risk", "severity": "warning",
+                      "message": f"Vacant {vacancy['months_vacant']:.0f} months: about ${vacancy['monthly_carry']:,.0f}/mo, "
+                                 f"~${vacancy['carry_since_vacant']:,.0f} since vacant",
+                      "suggestion": f"Each month of delay costs about ${vacancy['monthly_carry']:,.0f}; pick an exit and list within 30 days."})
     triggers = []
     if with_break_even:
         base_values = {"arv": r.arv, "market_rent": r.market_rent, "rehab_budget": r.rehab_budget}
@@ -961,6 +1067,7 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
         "property": {"address": p.address, "city": p.city, "state": p.state,
                      "occupancy": p.occupancy, "confidence": confidence(r)},
         "starting_equity": ev["starting_equity"],
+        "vacancy": vacancy,
         "assumptions": assumptions_list,
         "flags": flags,
         "scenarios": scenarios_json,
