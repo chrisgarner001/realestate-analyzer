@@ -117,9 +117,10 @@ def _assumptions(batch: OwnedBatch, tenant: Optional[Tenant]) -> owned_asset.Ass
 
 
 def _row_assumptions(a: owned_asset.Assumptions, row: OwnedBatchRow) -> owned_asset.Assumptions:
-    """Batch assumptions plus this property's own land-contract terms, if the owner edited them."""
-    terms = (_j(row.overrides, {}) or {}).get("_lc_terms") or {}
-    changes = {k: v for k, v in terms.items() if k in LC_TERM_FIELDS and v is not None}
+    """Batch assumptions, then this property's own edited assumptions, then its land-contract terms."""
+    ov = _j(row.overrides, {}) or {}
+    changes = {k: v for k, v in (ov.get("_assumptions") or {}).items() if k in ASSUMPTION_FIELDS and v is not None}
+    changes.update({k: v for k, v in (ov.get("_lc_terms") or {}).items() if k in LC_TERM_FIELDS and v is not None})
     return replace(a, **changes) if changes else a
 
 
@@ -154,6 +155,8 @@ OVERRIDE_BOUNDS = {
     "annual_tax": (0, 100_000), "arv": (1, 10_000_000), "as_is_value": (1, 10_000_000),
     "market_rent": (1, 50_000), "rehab_budget": (0, 500_000), "beds": (0, 20), "baths": (0, 20),
     "sqft": (100, 20_000), "year_built": (1800, 2030),
+    "utilities_monthly": (0, 2_000), "maintenance_monthly": (0, 5_000), "security_monthly": (0, 5_000),
+    "other_holding_monthly": (0, 10_000),
 }
 
 
@@ -578,7 +581,9 @@ def _row_json(row: OwnedBatchRow, current_hash: Optional[str] = None) -> dict:
         "estimates": _j(row.estimates), "analysis": analysis,
         "dollars_at_stake": row_dollars_at_stake(analysis) if analysis else None,
         "rationale": row.rationale,
-        "rationale_stale": bool(row.rationale and current_hash and row.rationale_assumptions != current_hash),
+        "rationale_stale": bool(row.rationale and ((current_hash and row.rationale_assumptions != current_hash)
+                                                   or (_j(row.overrides, {}) or {}).get("_edited"))),
+        "row_assumptions_edited": sorted(((_j(row.overrides, {}) or {}).get("_assumptions") or {}).keys()),
         "writeup": row.writeup, "writeup_status": row.writeup_status,
         "error": row.error, "debited": row.debited,
     }
@@ -941,6 +946,9 @@ def _run_stream(batch_id: int, row_id: int):
             return
         row.rationale = "".join(parts)
         row.rationale_assumptions = _assumptions_hash(a)
+        ov = _j(row.overrides, {}) or {}
+        if ov.pop("_edited", None):
+            row.overrides = _dump(ov)
         row.status = "done"
         row.finished_at = datetime.utcnow()
         db.commit()
@@ -1002,11 +1010,59 @@ async def set_lc_terms(batch_id: int, row_id: int, req: LcTermsRequest,
             if getattr(req, src) is not None:
                 terms[dst] = getattr(req, src)
     overrides["_lc_terms"] = terms
+    overrides["_edited"] = True
     row.overrides = _dump(overrides)
     tenant = db.query(Tenant).filter_by(id=batch.tenant_id).first() if batch.tenant_id else None
     a = _assumptions(batch, tenant)
     row.analysis = _dump(owned_asset.analyze(_property_inputs(db, row, _j(row.estimates) or {}),
                                              _row_assumptions(a, row)))
+    db.commit()
+    return _row_json(row, _assumptions_hash(a))
+
+
+class RowRecalcRequest(BaseModel):
+    """Report page 'Edit assumptions': property numbers and model assumptions for this property only.
+
+    A null value removes that override. reset_assumptions drops this property's assumption edits."""
+    inputs: Optional[dict] = None
+    assumptions: Optional[dict] = None
+    reset_assumptions: bool = False
+
+
+@router.post("/api/owned/batches/{batch_id}/rows/{row_id}/recalc")
+async def recalc_row(batch_id: int, row_id: int, req: RowRecalcRequest,
+                     user: User = Depends(require_owned_access), db: Session = Depends(get_db)):
+    """Free: rerun the financial engine for one property on its stored market data. No model or web calls."""
+    batch = _get_batch(db, batch_id, user)
+    row = _get_row(db, batch, row_id)
+    if row.status != "done" or not row.analysis:
+        raise HTTPException(409, "Run the analysis first")
+    ov = _j(row.overrides, {}) or {}
+    if req.inputs is not None:
+        merged = {k: v for k, v in {**ov, **req.inputs}.items()}
+        ov = _validate_overrides(merged)
+        ov = {k: v for k, v in ov.items() if v is not None}
+    if req.reset_assumptions:
+        ov.pop("_assumptions", None)
+    elif req.assumptions is not None:
+        current = dict(ov.get("_assumptions") or {})
+        for k, v in req.assumptions.items():
+            if k not in ASSUMPTION_FIELDS or k == "lc_servicer":
+                raise HTTPException(422, f"Unknown assumption: {k}")
+            if v is None or v == "":
+                current.pop(k, None)
+            else:
+                current.update(_validate_assumptions({k: v}))
+        ov["_assumptions"] = current
+    ov["_edited"] = True
+    row.overrides = _dump(ov)
+    tenant = db.query(Tenant).filter_by(id=batch.tenant_id).first() if batch.tenant_id else None
+    a = _assumptions(batch, tenant)
+    try:
+        row.analysis = _dump(owned_asset.analyze(_property_inputs(db, row, _j(row.estimates) or {}),
+                                                 _row_assumptions(a, row)))
+    except owned_asset.MissingInputError as e:
+        raise HTTPException(422, str(e))
     db.commit()
     return _row_json(row, _assumptions_hash(a))
 

@@ -479,3 +479,78 @@ class TestWriteupContext:
         content = json.loads(last_call["messages"][0]["content"])
         assert "research" in content
         assert "market" in content["research"] and "owner_entered_tax" in content["research"]
+
+
+class TestRowRecalc:
+    """Report page 'Edit assumptions & rerun': free, financial engine only."""
+
+    def _done_row(self, client, setup, fake):
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake)
+        return row
+
+    def _url(self, setup, row):
+        return f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/recalc"
+
+    def test_inputs_and_assumptions_change_numbers_without_model_calls(self, client, db, fake_anthropic, setup):
+        row = self._done_row(client, setup, fake_anthropic)
+        before = json.loads(_row(db, row["id"]).analysis)
+        calls = (len(fake_anthropic.create_calls), len(fake_anthropic.stream_calls))
+        r = client.post(self._url(setup, row), headers=setup["h"],
+                        json={"inputs": {"as_is_value": 95000, "security_monthly": 75},
+                              "assumptions": {"commission_pct": 5, "vacancy_pct": 10}})
+        assert r.status_code == 200, r.text
+        out = r.json()
+        vals = {x["name"]: x["value"] for x in out["analysis"]["assumptions"]}
+        assert vals["as_is_value"] == 95000 and vals["commission_pct"] == 5 and vals["vacancy_pct"] == 10
+        assert out["analysis"]["vacancy"]["monthly_breakdown"]["security"] == 75
+        assert out["analysis"]["scenarios"][0]["net_profit"] != before["scenarios"][0]["net_profit"]
+        assert (len(fake_anthropic.create_calls), len(fake_anthropic.stream_calls)) == calls
+        assert _balance(db, setup["user"]) == 95 and out["rationale_stale"] is True
+        assert out["row_assumptions_edited"] == ["commission_pct", "vacancy_pct"]
+
+    def test_other_rows_and_batch_assumptions_untouched(self, client, db, fake_anthropic, setup):
+        rows = _runnable(setup["batch"])[:2]
+        for r in rows:
+            _run(client, setup, r, fake_anthropic)
+        client.post(self._url(setup, rows[0]), headers=setup["h"], json={"assumptions": {"commission_pct": 4}})
+        other = {x["name"]: x["value"] for x in json.loads(_row(db, rows[1]["id"]).analysis)["assumptions"]}
+        assert other["commission_pct"] == 6
+        batch = client.get(f"/api/owned/batches/{setup['batch']['id']}", headers=setup["h"]).json()
+        assert batch["assumptions"]["commission_pct"] == 6
+
+    def test_edits_survive_batch_recalculate_and_reset(self, client, db, fake_anthropic, setup):
+        row = self._done_row(client, setup, fake_anthropic)
+        client.post(self._url(setup, row), headers=setup["h"], json={"assumptions": {"discount_rate_pct": 12}})
+        client.post(f"/api/owned/batches/{setup['batch']['id']}/recalculate", headers=setup["h"])
+        vals = {x["name"]: x["value"] for x in json.loads(_row(db, row["id"]).analysis)["assumptions"]}
+        assert vals["discount_rate_pct"] == 12
+        out = client.post(self._url(setup, row), headers=setup["h"], json={"reset_assumptions": True}).json()
+        vals = {x["name"]: x["value"] for x in out["analysis"]["assumptions"]}
+        assert vals["discount_rate_pct"] == 8 and out["row_assumptions_edited"] == []
+
+    def test_null_input_removes_override(self, client, db, fake_anthropic, setup):
+        row = self._done_row(client, setup, fake_anthropic)
+        client.post(self._url(setup, row), headers=setup["h"], json={"inputs": {"market_rent": 2000}})
+        out = client.post(self._url(setup, row), headers=setup["h"], json={"inputs": {"market_rent": None}}).json()
+        vals = {x["name"]: x["value"] for x in out["analysis"]["assumptions"]}
+        assert vals["market_rent"] == 1400 and "market_rent" not in out["overrides"]
+
+    def test_validation_and_guards(self, client, fake_anthropic, setup):
+        pending = _runnable(setup["batch"])[0]
+        assert client.post(self._url(setup, pending), headers=setup["h"], json={"inputs": {}}).status_code == 409
+        row = self._done_row(client, setup, fake_anthropic)
+        url = self._url(setup, row)
+        assert client.post(url, headers=setup["h"], json={"assumptions": {"commission_pct": 40}}).status_code == 422
+        assert client.post(url, headers=setup["h"], json={"assumptions": {"nope": 1}}).status_code == 422
+        assert client.post(url, headers=setup["h"], json={"inputs": {"arv": -5}}).status_code == 422
+
+    def test_new_paid_run_clears_stale_marker(self, client, db, fake_anthropic, setup):
+        row = self._done_row(client, setup, fake_anthropic)
+        client.post(self._url(setup, row), headers=setup["h"], json={"inputs": {"arv": 150000}})
+        r = db.get(OwnedBatchRow, row["id"])
+        r.status = "failed_refunded"          # make it runnable again, as a retry would
+        db.commit()
+        _run(client, setup, row, fake_anthropic)
+        stored = _row(db, row["id"])
+        assert "_edited" not in json.loads(stored.overrides)

@@ -458,6 +458,7 @@
         <button class="btn" :disabled="reportIndex()<=0" @click="stepReport(-1)">← Prev</button>
         <span class="muted" x-text="(reportIndex()+1) + ' of ' + reportList().length"></span>
         <div class="flex gap-2">
+          <button class="btn" @click="openReportEdit()">Edit assumptions &amp; rerun</button>
           <button class="btn" :disabled="reportIndex()>=reportList().length-1" @click="stepReport(1)">Next →</button>
           <button class="btn" @click="view='batch'">Back to summary</button>
         </div>
@@ -475,7 +476,10 @@
 
       <!-- Your four options -->
       <section>
-        <h2 class="font-semibold mb-3 px-1">Your four options</h2>
+        <div class="flex items-center justify-between gap-2 mb-3 px-1">
+          <h2 class="font-semibold">Your four options</h2>
+          <button class="btn btn-primary" @click="openReportEdit()">Edit assumptions &amp; rerun</button>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <template x-for="k in STRATS" :key="k">
             <div class="card rounded-xl p-4 space-y-2" :style="k===recOf(report).strategy && 'border:2px solid var(--gold-light)'">
@@ -508,7 +512,7 @@
         <div class="rounded-lg px-4 py-3" style="background:var(--navy-mid)">
           <p class="font-semibold" x-html="banner(report)"></p>
         </div>
-        <p x-show="!report.writeup && report.rationale_stale" class="text-xs" style="color:var(--gold-light)">Written under previous assumptions. The numbers above are current.</p>
+        <p x-show="report.rationale_stale" class="text-xs" style="color:var(--gold-light)">Written before your latest edits. The numbers are current.</p>
         <div class="prose-report text-sm" x-html="report.writeup ? md(writeupSection(report.writeup,'Recommendation')) : md(report.rationale || '')"></div>
         <div>
           <h3 class="font-semibold text-sm mb-1">What would change the answer</h3>
@@ -631,15 +635,36 @@
         </div>
 
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <div><label class="f">Sale price ($)</label><input class="w-full" type="number" min="0" x-model.number="lcForm.sale_price"></div>
-          <div><label class="f">Down payment (%)</label><input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.down_pct"></div>
-          <div><label class="f">Interest rate (%)</label><input class="w-full" type="number" min="0" step="0.01" x-model.number="lcForm.rate_pct"></div>
-          <div><label class="f">Term (years)</label><input class="w-full" type="number" min="1" x-model.number="lcForm.term_years"></div>
-          <div><label class="f">Default risk (%)</label><input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.default_prob_pct"></div>
+          <div>
+            <label class="f">Sale price ($)</label>
+            <input class="w-full" type="number" min="0" x-model.number="lcForm.sale_price" @input="lcScheduleRecalc()">
+            <p class="help" x-show="lcPriceVsArv()" x-text="lcPriceVsArv()"></p>
+            <p class="help" style="color:var(--gold-light)" x-show="lcHint('sale_price')" x-text="lcHint('sale_price')"></p>
+          </div>
+          <div>
+            <label class="f">Down payment (%)</label>
+            <input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.down_pct" @input="lcScheduleRecalc()">
+            <p class="help" style="color:var(--gold-light)" x-show="lcHint('down_pct')" x-text="lcHint('down_pct')"></p>
+          </div>
+          <div>
+            <label class="f">Interest rate (%)</label>
+            <input class="w-full" type="number" min="0" step="0.01" x-model.number="lcForm.rate_pct" @input="lcScheduleRecalc()">
+            <p class="help" style="color:var(--gold-light)" x-show="lcHint('rate_pct')" x-text="lcHint('rate_pct')"></p>
+          </div>
+          <div>
+            <label class="f">Term (years)</label>
+            <input class="w-full" type="number" min="1" x-model.number="lcForm.term_years" @input="lcScheduleRecalc()">
+            <p class="help" style="color:var(--gold-light)" x-show="lcHint('term_years')" x-text="lcHint('term_years')"></p>
+          </div>
+          <div>
+            <label class="f">Default risk (%)</label>
+            <input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.default_prob_pct" @input="lcScheduleRecalc()">
+            <p class="help" style="color:var(--gold-light)" x-show="lcHint('default_prob_pct')" x-text="lcHint('default_prob_pct')"></p>
+          </div>
         </div>
         <div class="flex flex-wrap items-center gap-3">
-          <button class="btn btn-primary" :disabled="lcBusy" @click="recalcLc(report)" x-text="lcBusy ? 'Recalculating…' : 'Recalculate · free'"></button>
           <button class="btn" :disabled="lcBusy" @click="resetLc(report)">Reset to batch terms</button>
+          <span class="text-xs muted" x-text="lcBusy ? 'Updating…' : 'Numbers update as you type'"></span>
           <span x-show="lcError" class="text-sm" style="color:var(--red)" x-text="lcError"></span>
         </div>
 
@@ -868,6 +893,64 @@
   </div>
 </template>
 
+<!-- Report edit drawer: owner edits this property's numbers & assumptions, rerun free -->
+<template x-if="reportEdit">
+  <div>
+    <div class="scrim" @click="reportEdit=null"></div>
+    <aside class="drawer card p-5 space-y-4" role="dialog" aria-modal="true" aria-label="Edit this property's numbers" @keydown.escape.window="reportEdit=null" x-init="$nextTick(()=>$el.querySelector('input')?.focus())">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold">Edit this property's numbers</h2>
+        <button class="btn" @click="reportEdit=null" aria-label="Close">✕</button>
+      </div>
+      <p class="help">Only the financial numbers are recalculated. Market data, comps and the written sections are not re-researched. No tokens are used.</p>
+
+      <fieldset class="space-y-3">
+        <legend class="text-xs font-semibold mb-2" style="color:var(--gold-light)">Property numbers</legend>
+        <template x-for="f in REPORT_PROP_FIELDS" :key="f.key">
+          <div>
+            <label class="f">
+              <span x-text="f.label"></span>
+              <span class="chip ml-1" :class="assumSource(f.key)==='USER'?'chip-green':(assumSource(f.key)==='DATA'?'chip-gold':'')" x-show="assumSource(f.key)" x-text="assumSource(f.key)"></span>
+            </label>
+            <input class="w-full" type="number" step="any" x-model="reportEdit.prop[f.key]">
+          </div>
+        </template>
+      </fieldset>
+
+      <fieldset class="space-y-3">
+        <legend class="text-xs font-semibold mb-2" style="color:var(--gold-light)">Assumptions</legend>
+        <template x-for="f in REPORT_ASSUMPTION_FIELDS" :key="f.key">
+          <div>
+            <label class="f" :style="isRowAssumEdited(f.key)&&'color:var(--text);font-weight:700'">
+              <span x-text="f.label"></span>
+              <span class="chip chip-gold ml-1" x-show="isRowAssumEdited(f.key)">edited</span>
+            </label>
+            <template x-if="f.key==='owner_goal'">
+              <select class="w-full" x-model="reportEdit.assum.owner_goal">
+                <option value="">None</option>
+                <option value="maximize_cash_now">Cash now</option>
+                <option value="maximize_total_return">Total return</option>
+                <option value="monthly_income">Monthly income</option>
+                <option value="minimize_effort">Least effort</option>
+              </select>
+            </template>
+            <template x-if="f.key!=='owner_goal'">
+              <input class="w-full" type="number" step="any" x-model="reportEdit.assum[f.key]">
+            </template>
+          </div>
+        </template>
+      </fieldset>
+
+      <p x-show="reportEdit.error" class="text-sm" style="color:var(--red)" x-text="reportEdit.error"></p>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-primary" :disabled="reportEdit.busy" @click="rerunReportEdit()" x-text="reportEdit.busy ? 'Recalculating…' : 'Rerun · free'"></button>
+        <button class="btn" :disabled="reportEdit.busy" @click="resetReportAssumptions()">Reset assumptions to batch</button>
+        <button class="btn" @click="reportEdit=null">Cancel</button>
+      </div>
+    </aside>
+  </div>
+</template>
+
 <!-- Start dialog when statements are unconfirmed (N-design D4) -->
 <template x-if="startDialog">
   <div>
@@ -911,7 +994,8 @@ function portfolio() {
     stmtBusy: false, stmtProgress: '', stmtEdits: {},
     drawer: null, startDialog: false,
     writeupBusy: false, writeupText: '', writeupError: '',
-    lcForm: { sale_price: '', down_pct: '', rate_pct: '', term_years: '', default_prob_pct: '' }, lcBusy: false, lcError: '',
+    lcForm: { sale_price: '', down_pct: '', rate_pct: '', term_years: '', default_prob_pct: '' }, lcBusy: false, lcError: '', lcTimer: null, lcSeq: 0,
+    reportEdit: null,
     statusIndex: 0, statusTimer: null,
     STATUSES: [
       { label: 'Connecting to market data', detail: 'Gathering current property and neighborhood information' },
@@ -959,6 +1043,42 @@ function portfolio() {
       { title: 'Rental', fields: [{ key: 'vacancy_pct', label: 'Vacancy %' }, { key: 'maintenance_pct', label: 'Maintenance %' }, { key: 'capex_pct', label: 'CapEx %' }, { key: 'management_pct', label: 'Management %' }, { key: 'rent_growth_pct', label: 'Rent growth %' }] },
       { title: 'Land contract', help: 'Default probability: share of land-contract buyers expected to stop paying. On default, payments stop at month 14 and the property is resold as-is.',
         fields: [{ key: 'lc_price_premium_pct', label: 'Price premium %' }, { key: 'lc_down_pct', label: 'Down payment %' }, { key: 'lc_rate_pct', label: 'Rate %' }, { key: 'lc_amort_years', label: 'Amortization (yrs)' }, { key: 'lc_default_prob_pct', label: 'Default probability %' }, { key: 'lc_servicing_monthly', label: 'Servicing $/mo' }, { key: 'lc_servicer', label: 'Servicer' }] },
+    ],
+    REPORT_PROP_FIELDS: [
+      { key: 'as_is_value', label: 'As-is value' },
+      { key: 'arv', label: 'After-repair value' },
+      { key: 'market_rent', label: 'Market rent / mo' },
+      { key: 'rehab_budget', label: 'Rehab budget' },
+      { key: 'annual_tax', label: 'Property tax / yr' },
+      { key: 'annual_insurance', label: 'Insurance / yr' },
+      { key: 'utilities_monthly', label: 'Utilities / mo' },
+      { key: 'maintenance_monthly', label: 'Maintenance / mo' },
+      { key: 'security_monthly', label: 'Security / mo' },
+      { key: 'other_holding_monthly', label: 'Other holding / mo' },
+      { key: 'loan_payoff', label: 'Loan balance' },
+      { key: 'loan_rate_pct', label: 'Loan rate %' },
+      { key: 'loan_pi', label: 'Loan P&I / mo' },
+      { key: 'investor_payback', label: 'Investor payback' },
+      { key: 'cost_basis', label: 'Cost basis' },
+    ],
+    REPORT_ASSUMPTION_FIELDS: [
+      { key: 'discount_rate_pct', label: 'Discount rate %' },
+      { key: 'owner_goal', label: 'Tie-breaker goal' },
+      { key: 'horizon_months', label: 'Horizon (months)' },
+      { key: 'commission_pct', label: 'Commission %' },
+      { key: 'closing_pct', label: 'Closing + transfer tax %' },
+      { key: 'as_is_commission_pct', label: 'As-is commission %' },
+      { key: 'concessions_pct', label: 'Concessions %' },
+      { key: 'contingency_pct', label: 'Rehab contingency %' },
+      { key: 'utilities_vacant_monthly', label: 'Vacant utilities default $/mo' },
+      { key: 'insurance_default_annual', label: 'Insurance default $/yr' },
+      { key: 'vacancy_pct', label: 'Vacancy %' },
+      { key: 'maintenance_pct', label: 'Maintenance %' },
+      { key: 'capex_pct', label: 'CapEx %' },
+      { key: 'management_pct', label: 'Management %' },
+      { key: 'rent_growth_pct', label: 'Rent growth %' },
+      { key: 'appreciation_default_pct', label: 'Appreciation %' },
+      { key: 'cost_of_capital_pct', label: 'Cost of capital % (blank = discount rate)' },
     ],
     DEFAULTS: null,
 
@@ -1310,7 +1430,40 @@ function portfolio() {
       const d = this.lcD(r);
       this.lcForm = { sale_price: d.lc_price ?? '', down_pct: d.down_pct ?? '', rate_pct: d.rate_pct ?? '', term_years: d.amort_years ?? '', default_prob_pct: d.default_prob_pct ?? '' };
     },
+    lcValid() {
+      const f = this.lcForm;
+      if (f.sale_price === '' || f.sale_price == null || f.down_pct === '' || f.down_pct == null || f.rate_pct === '' || f.rate_pct == null || f.term_years === '' || f.term_years == null || f.default_prob_pct === '' || f.default_prob_pct == null) return false;
+      const price = Number(f.sale_price), down = Number(f.down_pct), rate = Number(f.rate_pct), term = Number(f.term_years), def = Number(f.default_prob_pct);
+      if (isNaN(price) || isNaN(down) || isNaN(rate) || isNaN(term) || isNaN(def)) return false;
+      return price > 0 && down >= 0 && down <= 50 && rate >= 0 && rate <= 20 && term >= 1 && term <= 40 && def >= 0 && def <= 60;
+    },
+    lcHint(field) {
+      const v = this.lcForm[field];
+      if (v === '' || v == null || isNaN(Number(v))) return '';
+      const n = Number(v);
+      if (field === 'sale_price') return n > 0 ? '' : 'Sale price must be greater than 0';
+      if (field === 'down_pct') return (n >= 0 && n <= 50) ? '' : 'Down payment must be 0-50%';
+      if (field === 'rate_pct') return (n >= 0 && n <= 20) ? '' : 'Interest rate must be 0-20%';
+      if (field === 'term_years') return (n >= 1 && n <= 40) ? '' : 'Term must be 1-40 years';
+      if (field === 'default_prob_pct') return (n >= 0 && n <= 60) ? '' : 'Default risk must be 0-60%';
+      return '';
+    },
+    lcPriceVsArv() {
+      if (!this.report) return '';
+      const arvEntry = (this.report.analysis.assumptions || []).find(a => a.name === 'arv');
+      const arv = arvEntry ? Number(arvEntry.value) : null;
+      const price = Number(this.lcForm.sale_price);
+      if (!arv || !price || isNaN(price)) return '';
+      const pct = Math.round(((price - arv) / arv) * 1000) / 10;
+      return (pct >= 0 ? pct + '% above' : Math.abs(pct) + '% below') + ' after-repair value';
+    },
+    lcScheduleRecalc() {
+      clearTimeout(this.lcTimer);
+      this.lcTimer = setTimeout(() => { if (this.report) this.recalcLc(this.report); }, 600);
+    },
     async recalcLc(r) {
+      if (!this.lcValid()) return;
+      const seq = ++this.lcSeq;
       this.lcBusy = true; this.lcError = '';
       try {
         const body = { sale_price: Number(this.lcForm.sale_price), down_pct: Number(this.lcForm.down_pct), rate_pct: Number(this.lcForm.rate_pct), term_years: Number(this.lcForm.term_years), default_prob_pct: Number(this.lcForm.default_prob_pct) };
@@ -1318,10 +1471,13 @@ function portfolio() {
         Object.assign(r, resp);
         const idx = this.batch.rows.findIndex(x => x.id === r.id);
         if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
-        this.fillLcForm(r);
-      } catch (e) { this.lcError = e.message; } finally { this.lcBusy = false; }
+        if (seq === this.lcSeq) this.fillLcForm(r);
+      } catch (e) { if (seq === this.lcSeq) this.lcError = e.message; }
+      finally { if (seq === this.lcSeq) this.lcBusy = false; }
     },
     async resetLc(r) {
+      clearTimeout(this.lcTimer);
+      this.lcSeq++;
       this.lcBusy = true; this.lcError = '';
       try {
         const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${r.id}/lc-terms`, { method: 'POST', json: { reset: true } });
@@ -1330,6 +1486,65 @@ function portfolio() {
         if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
         this.fillLcForm(r);
       } catch (e) { this.lcError = e.message; } finally { this.lcBusy = false; }
+    },
+
+    // ── report edit (edit this property's numbers & assumptions, rerun free) ──
+    assumOf(key) { return (this.report.analysis.assumptions || []).find(a => a.name === key); },
+    assumSource(key) { const a = this.assumOf(key); return a ? a.source : null; },
+    isRowAssumEdited(key) { return !!(this.report.row_assumptions_edited && this.report.row_assumptions_edited.includes(key)); },
+    openReportEdit() {
+      const r = this.report;
+      const valueOf = key => { const a = this.assumOf(key); return (a && a.value != null) ? a.value : ''; };
+      const prop = {}; this.REPORT_PROP_FIELDS.forEach(f => { prop[f.key] = valueOf(f.key); });
+      const assum = {}; this.REPORT_ASSUMPTION_FIELDS.forEach(f => { assum[f.key] = f.key === 'owner_goal' ? (valueOf(f.key) || '') : valueOf(f.key); });
+      this.reportEdit = { prop, propPrefill: { ...prop }, assum, assumPrefill: { ...assum }, busy: false, error: '' };
+    },
+    async rerunReportEdit() {
+      const re = this.reportEdit;
+      const inputs = {}; let anyInputs = false;
+      this.REPORT_PROP_FIELDS.forEach(f => {
+        const nv = re.prop[f.key], ov = re.propPrefill[f.key];
+        const nvNorm = (nv === '' || nv == null) ? null : Number(nv);
+        const ovNorm = (ov === '' || ov == null) ? null : Number(ov);
+        if (nvNorm !== ovNorm) { inputs[f.key] = nvNorm; anyInputs = true; }
+      });
+      const assumptions = {}; let anyAssum = false;
+      this.REPORT_ASSUMPTION_FIELDS.forEach(f => {
+        if (f.key === 'owner_goal') {
+          const nv = re.assum.owner_goal || null, ov = re.assumPrefill.owner_goal || null;
+          if (nv !== ov) { assumptions.owner_goal = nv; anyAssum = true; }
+          return;
+        }
+        const nv = re.assum[f.key], ov = re.assumPrefill[f.key];
+        const nvNorm = (nv === '' || nv == null) ? null : Number(nv);
+        const ovNorm = (ov === '' || ov == null) ? null : Number(ov);
+        if (nvNorm !== ovNorm) { assumptions[f.key] = nvNorm; anyAssum = true; }
+      });
+      if (!anyInputs && !anyAssum) { this.reportEdit = null; return; }
+      re.busy = true; re.error = '';
+      try {
+        const body = {}; if (anyInputs) body.inputs = inputs; if (anyAssum) body.assumptions = assumptions;
+        const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${this.report.id}/recalc`, { method: 'POST', json: body });
+        Object.assign(this.report, resp);
+        const idx = this.batch.rows.findIndex(x => x.id === this.report.id);
+        if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
+        this.fillLcForm(this.report);
+        this.reportEdit = null;
+        this.liveMessage = 'Recalculated with your changes';
+      } catch (e) { re.error = e.message; re.busy = false; }
+    },
+    async resetReportAssumptions() {
+      const re = this.reportEdit;
+      re.busy = true; re.error = '';
+      try {
+        const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${this.report.id}/recalc`, { method: 'POST', json: { reset_assumptions: true } });
+        Object.assign(this.report, resp);
+        const idx = this.batch.rows.findIndex(x => x.id === this.report.id);
+        if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
+        this.fillLcForm(this.report);
+        this.reportEdit = null;
+        this.liveMessage = 'Assumptions reset to batch';
+      } catch (e) { re.error = e.message; re.busy = false; }
     },
     async runWriteup(r) {
       this.writeupBusy = true; this.writeupText = ''; this.writeupError = ''; this.startStatus();
