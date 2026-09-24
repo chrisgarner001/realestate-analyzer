@@ -921,17 +921,579 @@ None.
   +====================================================================+
 ```
 
+## S1 Engine Math Review (/plan-eng-review, 2026-09-24)
+
+Target: docs/specs/exit-strategy-analyzer-v1.md as implemented in web/owned_asset.py. Scope: 2 approved files, no new units; complexity gate not tripped. Approved E1-E11, S1, S1a, S1b and batch D3-D18 are fixed and not re-asked.
+
+### M1: NPV basis — does each strategy's cash flow include the starting equity at month 0?
+Finding: P1, confidence 9/10, spec Core Principles "same starting point: the owner's current equity position today (market value as-is minus the loan payoff)" and Metrics "NPV @ discount rate | Present value of all monthly cash flows, including terminal value". Whether month 0 carries −starting_equity is unstated. It changes every NPV by the same amount, but S1a and the Risk-Adjusted Score divide NPV by (1 + risk), so the offset changes rankings. Reviewer: Claude.
+Plan baseline: unspecified.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1 NPV basis | unspecified | strategy cash flows only (no −equity at month 0); starting equity used only in Equity Multiple and shown as context; NPV = value the owner gets from that path in today's dollars | include −starting_equity at month 0 (incremental NPV vs. doing nothing); Sell as-is ≈ −selling costs |
+| M2-M7 | pending | pending | pending |
+Question D1:
+D1 — Should each strategy's NPV subtract IRES's current equity at the start?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your spec compares every strategy "from the owner's current equity today." There are two ways to code that. Either each strategy's value is simply "what this path pays IRES, in today's dollars", or every path first subtracts today's equity, so the numbers show gain over the current position. Both rank the same with plain NPV, but your ranking divides NPV by a risk factor, and dividing a negative number makes riskier options look better. Subtracting equity makes most NPVs small or negative, which breaks the risk ranking.
+Stakes if we pick wrong: the risk adjustment flips and recommends the riskiest exit on underwater or thin-margin properties.
+Recommendation: A because NPVs stay positive in almost all cases, so the risk-adjusted ranking behaves as your spec intends.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Strategy cash flows only (recommended)
+  ✅ NPV reads as "what this path is worth to IRES today"; comparable across all four
+  ✅ Keeps NPV positive in normal cases, so NPV ÷ (1 + risk) ranks as intended
+  ❌ Starting equity appears only in Equity Multiple, not in each NPV
+B) Subtract starting equity at month 0
+  ✅ NPV reads as gain versus today's equity position
+  ❌ Many NPVs go negative, where dividing by (1 + risk) rewards risk
+Net: stable risk ranking vs. a gain-over-today framing that breaks it.
+Header: NPV basis
+Options:
+A) Strategy cash flows only (recommended)
+Each scenario's monthly cash flows start at month 0 with that path's own flows (rehab outlays, carry, proceeds, payments, terminal value); no −starting_equity line. Equity Multiple = total cash returned ÷ (starting equity + additional capital) per spec. Report shows starting equity once as context. Tests: identical inputs → Sell as-is NPV = discounted net proceeds; equity multiple formula. Effort: human ~30min / CC ~5min. Low risk.
+B) Subtract starting equity at month 0
+Month-0 flow includes −(as-is value − payoff) for every strategy; NPV = incremental value vs. today. Tests: Sell as-is NPV ≈ −(selling costs + carry) discounted. Effort: human ~30min / CC ~5min. Risk: breaks risk ranking unless M2 handles negatives.
+
+State: approved
+Actual answer: A) Strategy cash flows only (D1, 2026-09-24)
+Accepted scope: Scenario cash flows exclude −starting_equity at month 0; Equity Multiple = cash returned ÷ (starting equity + additional capital); starting equity shown once as context. Tests: Sell as-is NPV = discounted net proceeds; equity multiple formula.
+History: none
+
+### M8: Investor payback and cost basis (founder facts, 2026-09-24)
+Finding: P1, confidence 9/10, founder: "an updated Cost Basis in addition to the loan amount ... exposure to an investor payback when liquidated." Founder facts: payback = a **fixed amount per property**; cost basis = **purchase + improvements + carrying costs**. The spec has no investor-payback or basis inputs. Reviewer: founder + Claude.
+Plan baseline: not modeled.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1 | approved (D1) | fixed | fixed |
+| M8 inputs | none | per-property `investor_payback` ($, default 0) and `cost_basis` ($); CSV optional columns "Investor Payback" / "Cost Basis" (aliases) + preview Edit drawer (same pattern as loan, D5); preview flag "No cost basis" | same inputs and entry |
+| M8 payback in cash flows | none | deducted as a cash outflow at each strategy's liquidation event: Sell as-is and Retail at closing; Rent at the month-36 terminal sale; Land contract per M9; also subtracted in starting equity (as-is − loan payoff − investor payback) | shown only as a separate "Investor payback due" line; not in NPV or ranking |
+| M8 cost basis use | none | not a cash flow (sunk); report shows per strategy "Profit vs. cost basis" = net proceeds after loan + payback − cost basis, and a "Below cost basis" flag; basis feeds the CPA gain note | same display |
+| M8 shortfall | none | flag "Proceeds don't cover loan + investor payback: IRES short $X" when net < 0 at liquidation; negative flows kept in NPV | same flag |
+| M9-M10 | pending | pending | pending |
+Question D2:
+D2 — How should the fixed investor payback enter the numbers?
+Project/branch/task: S1 engine math review on main.
+ELI10: When a property is sold, IRES must repay the loan and a fixed amount to the partnership's investors. If that payback counts as real cash out in every exit, the ranking reflects what IRES actually keeps. Cost basis (what IRES has put in, including carrying costs) is already spent, so it shouldn't change the ranking, but the report should show profit against it and flag when a sale lands below it. If proceeds don't cover the loan plus payback, the report says exactly how much IRES must fund.
+Stakes if we pick wrong: the report recommends a sale that leaves IRES writing a check to investors, without saying so.
+Recommendation: A because the payback is real cash leaving at liquidation, and leaving it out overstates every exit.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Payback in cash flows; basis for profit display (recommended)
+  ✅ NPV and ranking reflect what IRES keeps after the loan and investors are paid
+  ✅ Shortfall flag shows how much IRES must fund; "Profit vs. cost basis" shows the true result
+  ❌ A fixed payback paid later discounts to less, so slower exits look slightly cheaper
+B) Payback shown separately, not in NPV
+  ✅ Ranking stays purely on property economics
+  ❌ Recommends exits without the investor obligation; misleading for a partnership
+Net: ranking on what IRES keeps vs. ranking on gross property value.
+Header: Investor payback
+Options:
+A) Payback in cash flows; basis for display (recommended)
+New inputs investor_payback (0-5,000,000, default 0) and cost_basis (0-5,000,000; purchase + improvements + carrying costs, per founder); CSV aliases + Edit drawer; preview flag 'No cost basis'. Payback = outflow at each strategy's liquidation event (Sell/Retail closing, Rent month-36 terminal sale, LC per M9) and in starting equity. Cost basis never a cash flow; report row 'Profit vs. cost basis' + 'Below cost basis' flag; CPA note uses basis. Shortfall flag when proceeds < loan + payback. Tests: payback reduces each strategy's NPV at the right month; shortfall flag; basis doesn't change ranking. Effort: human ~3h / CC ~20min. Low risk.
+B) Payback shown separately
+Same inputs; payback and basis displayed as lines, excluded from NPV/ranking. Effort: human ~1.5h / CC ~10min. Risk: overstates what IRES keeps.
+
+State: approved
+Actual answer: A) Payback in cash flows; basis for display (D2, 2026-09-24)
+Accepted scope: investor_payback (0-5M, default 0) and cost_basis (0-5M; purchase + improvements + carrying costs) per property via CSV aliases + Edit drawer; 'No cost basis' preview flag. Payback is an outflow at each strategy's liquidation event and in starting equity; cost basis never a cash flow, shown as 'Profit vs. cost basis' with 'Below cost basis' flag and used in the CPA note; shortfall flag when proceeds < loan + payback. Tests: payback timing per strategy; shortfall; basis does not change ranking.
+History: none
+
+### M9: When the investor payback is due on a land-contract sale (REOPENED)
+Finding: P1, confidence 9/10. Reopened on founder fact (2026-09-24): "Investor gets paid when the Land Contract is paid off or sold to another investor." This contradicts the approved default "at closing" (D3). Reviewer: founder + Claude.
+Plan baseline: D3 approved per-portfolio setting, default "at closing".
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1, M2, M8 | approved (D1, D4, D2) | fixed | fixed |
+| M9 LC payback timing | per-portfolio, default at closing (D3) | single rule for all portfolios, no setting: payback due when the LC is paid off or the note is sold. Performing + balloon paid (60%): at month 36 from the balloon. Extended (40%): note valued at 85% of face at month 36 (note-sale value), payback deducted from it. Buyer default: payback at the month-20 as-is resale. Payback also counted in the 36-month horizon terminal value where the note is still held. | keep the per-portfolio setting, change its default to "at payoff/note sale" |
+| M3-M7 | pending | pending | pending |
+Question D5:
+D5 — Make "investors are paid when the land contract is paid off or the note is sold" the rule?
+Project/branch/task: S1 engine math review on main.
+ELI10: You said investors get paid when the land contract is paid off or the note is sold to another investor, not at closing. So the payback comes out of the balloon payment, out of the note-sale value if the contract is extended, or out of the resale if the buyer defaults. Since that's how IRES works, it can be the rule for every portfolio instead of a setting someone has to remember.
+Stakes if we pick wrong: land contracts show a check IRES doesn't actually write at closing, which undervalues that exit.
+Recommendation: A because it's IRES's actual practice, and a setting nobody needs is one more thing to get wrong.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) One rule: paid at payoff or note sale (recommended)
+  ✅ Matches how IRES actually repays investors on land contracts
+  ✅ No per-portfolio setting to configure or forget
+  ❌ If a future partnership requires payback at closing, it needs a code change
+B) Keep the setting, new default
+  ✅ Flexible if some partnership differs later
+  ❌ An extra setting on every batch that, today, nobody changes
+Net: IRES's rule built in vs. flexibility nobody currently needs.
+Header: LC payback rule
+Options:
+A) One rule: paid at payoff or note sale (recommended)
+No setting. land_contract(): payback deducted at month 36 from the balloon (performing, paid 60%), from the 85%-of-face note value (extended 40%), and from the month-20 resale (default branch); no payback at LC closing; shortfall flag if the receiving event doesn't cover it. Tests: each branch deducts payback once at the right month; no deduction at closing. Effort: human ~1.5h / CC ~10min. Low risk.
+B) Keep the setting, new default
+Per-portfolio setting stays; default 'at payoff/note sale' with the same branch rules; 'at closing' remains selectable. Tests: both settings. Effort: human ~2h / CC ~15min. Low risk.
+
+State: approved
+Actual answer: A) One rule: payoff or note sale (D5, 2026-09-24)
+Accepted scope: No setting. Investor payback on LC deducted at month 36 from the balloon (performing), from the 85%-of-face note value (extended), and from the month-20 resale (default branch); never at LC closing; shortfall flag if the receiving event doesn't cover it. Loan payoff at LC closing (E7) unchanged. Tests: each branch deducts once at the right month; none at closing.
+History: D3 (2026-09-24) approved "A) Per-portfolio, default at closing" with accepted scope: per-portfolio 'Investor payback on LC: at closing | at balloon' (default at closing). Reopened on founder fact that investors are paid at LC payoff or note sale.
+
+### M2: Risk-adjusted score when NPV is negative
+Finding: P1, confidence 9/10, spec Metrics "Risk-Adjusted Score | NPV ÷ (1 + Risk Score × 0.1)". For NPV < 0, dividing shrinks the loss, so a riskier strategy scores better (−100,000 at risk 10 → −50,000; at risk 1 → −90,909). M8/M9 shortfalls make negative NPVs common. Reviewer: Claude.
+Plan baseline: spec formula, sign behavior unspecified.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1, M8, M9 | approved (D1-D3) | fixed | fixed |
+| M2 negative NPV | formula divides regardless of sign | NPV ≥ 0: NPV ÷ (1 + 0.1 × risk); NPV < 0: NPV × (1 + 0.1 × risk), so risk always makes the score worse | spec formula as written for all signs |
+| M3-M7 | pending | pending | pending |
+Question D4:
+D4 — How should the risk adjustment treat strategies that lose money?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your ranking shrinks each strategy's value by its risk: divide by (1 + risk × 0.1). That works when the value is positive. When a strategy loses money, dividing shrinks the loss, so the riskiest losing option looks least bad. The fix is to multiply losses instead of dividing, so risk always makes a score worse. Positive cases are unchanged.
+Stakes if we pick wrong: on a property where every exit loses money, the report recommends the riskiest one.
+Recommendation: A because risk should always penalize, and it leaves every positive-NPV case exactly as your spec defines.
+Completeness: A=10/10, B=5/10
+Pros / cons:
+A) Penalize losses too (recommended)
+  ✅ Risk always lowers the score; the riskiest loser ranks last, as intended
+  ✅ Identical to your formula whenever NPV is positive
+  ❌ Slight deviation from the spec's literal formula, which must be documented
+B) Spec formula for all signs
+  ✅ Literal match to the spec text
+  ❌ Riskier losing strategies outrank safer ones on underwater or shortfall properties
+Net: risk that always penalizes vs. a literal formula that rewards risk on losses.
+Header: Negative scores
+Options:
+A) Penalize losses too (recommended)
+risk_adjusted = npv / (1 + 0.1*risk) if npv >= 0 else npv * (1 + 0.1*risk); spec file annotated with this rule. Tests: positive case matches spec; negative case: higher risk → lower score; mixed signs rank positive above negative. Effort: human ~15min / CC ~3min. Low risk.
+B) Spec formula for all signs
+risk_adjusted = npv / (1 + 0.1*risk) always. Test: formula. Effort: none. Risk: inverted ranking on losses.
+
+State: approved
+Actual answer: A) Penalize losses too (D4, 2026-09-24)
+Accepted scope: risk_adjusted = npv/(1+0.1*risk) if npv >= 0 else npv*(1+0.1*risk); annotate the spec. Tests: positive matches spec; negative: higher risk lower score; positives rank above negatives.
+History: none
+
+### M3: Which inputs count toward the confidence rule
+Finding: P1, confidence 9/10, spec Pre-flight "count the DEFAULT-tagged inputs. More than 5 caps confidence at Medium". The Defaults table alone has ~25 DEFAULT values (commission, vacancy, growth...) used on every property, so a literal count caps every report at Medium and the Confidence column (batch D13) can never read High. Reviewer: Claude.
+Plan baseline: spec rule as written.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1, M2, M8, M9 | approved | fixed | fixed |
+| M3 counted inputs | all DEFAULT tags (~25+) | count only property-specific inputs: as-is value, ARV, market rent, DOM (as-is, renovated), appreciation, months of supply, rehab budget, property facts (beds/baths/sqft/year), annual tax, insurance, loan payoff, investor payback, cost basis. Defaults-table assumptions never count (still disclosed). >5 DEFAULT among these → max Medium; ARV or rent missing → Low (spec); S1b missing facts → Low | count every DEFAULT tag (literal) |
+| M4-M7 | pending | pending | pending |
+Question D6:
+D6 — Which assumptions count when deciding a report's confidence (High/Medium/Low)?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your spec says more than 5 defaulted inputs caps confidence at Medium. But the defaults table (commission, vacancy, growth rates...) is used on every property, about 25 values, so counted literally every report is Medium and "High" never appears. Counting only the property-specific facts (value, ARV, rent, rehab, taxes, insurance, loan, payback, basis, beds/baths) makes confidence mean "how much do we actually know about THIS house."
+Stakes if we pick wrong: every property shows Medium, and the confidence column stops telling staff which ones to check.
+Recommendation: A because confidence should reflect what's known about each property, and standard assumptions are disclosed anyway.
+Completeness: A=9/10, B=4/10
+Pros / cons:
+A) Count property-specific inputs only (recommended)
+  ✅ High/Medium/Low separates well-documented properties from guesswork
+  ✅ Standard assumptions are still listed in the Assumptions table
+  ❌ Deviates from the literal spec wording; needs a note in the spec
+B) Count every default
+  ✅ Literal spec match
+  ❌ Every report capped at Medium; the column carries no signal
+Net: a meaningful confidence signal vs. a literal rule that's always Medium.
+Header: Confidence rule
+Options:
+A) Count property-specific inputs only (recommended)
+Counted set: as-is value, ARV, market rent, DOM as-is, DOM renovated, appreciation, months of supply, rehab budget, beds, baths, sqft, year built, annual tax, insurance, loan payoff, investor payback, cost basis. >5 DEFAULT → max Medium; missing ARV or rent comps → Low; S1b missing facts → Low. Defaults-table values excluded from the count, still tagged in Assumptions. Spec annotated. Tests: 0 defaults → High; 6 defaults → Medium; missing ARV → Low. Effort: human ~30min / CC ~5min. Low risk.
+B) Count every default
+Literal count of all DEFAULT-tagged values. Tests: rule. Effort: none. Risk: always Medium.
+
+State: approved
+Actual answer: A) Property-specific inputs only (D6, 2026-09-24)
+Accepted scope: Confidence counts DEFAULT tags only among: as-is value, ARV, market rent, DOM as-is/renovated, appreciation, months of supply, rehab budget, beds, baths, sqft, year built, annual tax, insurance, loan payoff, investor payback, cost basis. >5 → max Medium; missing ARV or rent comps → Low; S1b missing facts → Low. Defaults-table values excluded but still tagged. Spec annotated. Tests: 0 → High; 6 → Medium; missing ARV → Low.
+History: none
+
+### M4: Rehab financing cost vs. discounting (double count)
+Finding: P1, confidence 8/10, spec Scenario B "Minus financing cost on the rehab capital (at the user's cost of capital, or the discount rate)". NPV already discounts every monthly flow at the discount rate; also subtracting a financing charge at the same rate counts the time cost of rehab money twice in NPV, penalizing Rehab & Sell (and, by extension, rehab paths generally). Reviewer: Claude.
+Plan baseline: spec text.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M3, M8, M9 | approved | fixed | fixed |
+| M4 financing cost | subtracted (rate unspecified per use) | shown in Net Profit (undiscounted metric) as "Financing cost on rehab capital" at the discount rate unless a separate `cost_of_capital_pct` is set; excluded from NPV cash flows (discounting covers it) — unless cost_of_capital_pct is set and differs from the discount rate, then only the difference is charged in NPV | charged in both Net Profit and NPV |
+| M5-M7 | pending | pending | pending |
+Question D7:
+D7 — Should the rehab financing charge be counted in NPV when NPV already discounts for time?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your spec charges Rehab & Sell a financing cost on the rehab money. But NPV already shrinks every future dollar by the discount rate, which is the cost of tying money up. Charging a financing cost at that same rate on top counts the same cost twice and makes rehab look worse than it is. Show the financing cost in Net Profit (which isn't discounted), and in NPV only charge any extra if IRES's actual borrowing rate is higher than the discount rate.
+Stakes if we pick wrong: rehab exits are systematically undervalued and lose close calls they should win.
+Recommendation: A because it counts the cost of rehab money once in each metric.
+Completeness: A=9/10, B=5/10
+Pros / cons:
+A) Once per metric (recommended)
+  ✅ Net Profit shows the financing cost explicitly; NPV isn't double-charged
+  ✅ If IRES borrows above the discount rate, only the extra is charged in NPV
+  ❌ Net Profit and NPV treat financing differently, which needs a footnote
+B) Charge in both
+  ✅ Literal match to the spec text
+  ❌ Double-counts time cost in NPV and biases against rehab
+Net: correct single counting vs. a literal but biased double charge.
+Header: Financing cost
+Options:
+A) Once per metric (recommended)
+Net Profit includes 'Financing cost on rehab capital' = rehab outlay × cost_of_capital_pct (default = discount rate) × months outstanding / 12. NPV excludes it unless cost_of_capital_pct > discount rate, then charges only the spread. Applies to Rehab & Sell, Rehab & Rent, Rehab & LC rehab outlays. Footnote in report. Tests: equal rates → NPV unchanged by financing; higher cost of capital → spread charged; Net Profit includes charge. Effort: human ~45min / CC ~6min. Low risk.
+B) Charge in both
+Financing cost subtracted in Net Profit and as a cash flow in NPV. Tests: charge present in both. Effort: human ~20min / CC ~3min. Risk: rehab undervalued.
+
+State: approved
+Actual answer: A) Once per metric (D7, 2026-09-24)
+Accepted scope: Net Profit includes 'Financing cost on rehab capital' = rehab outlay × cost_of_capital_pct (default = discount rate) × months outstanding / 12; NPV excludes it unless cost_of_capital_pct > discount rate (then only the spread). Applies to all rehab outlays. Report footnote. Tests: equal rates → NPV unchanged; spread charged; Net Profit includes charge.
+History: none
+
+### M10: Liquidation selling costs (founder facts vs. spec defaults)
+Finding: P1, confidence 9/10. Founder (2026-09-24): "usually 6% realtor commission, closing cost of about 1.5% on average. They currently factor 8% in closing cost total." Spec Defaults: commission 5.5%, seller closing 1.5%, Michigan transfer tax 0.86%, concessions 2% if months of supply > 4; as-is investor sale commission 3%. Reviewer: founder + Claude.
+Plan baseline: spec Defaults (S1).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M4, M8, M9 | approved | fixed | fixed |
+| M10 retail + rent-terminal selling costs | 5.5% + 1.5% + 0.86% + concessions | IRES practice: commission 6.0% + closing incl. transfer tax 2.0% = 8.0% all-in (itemized as two lines); concessions rule kept (2% if months of supply > 4), shown separately; land contract: no commission (spec), closing incl. transfer tax 2.0% | spec itemization with commission raised to 6%: 6.0% + 1.5% + 0.86% transfer tax (= 8.36%) + concessions |
+| M10 as-is sale | investor 3% commission (spec) | 3% commission + 2.0% closing incl. transfer tax (off-market investor sale) | 3% + 1.5% + 0.86% |
+| M10 editability | per batch (D12) | all rates editable per batch; defaults labeled "IRES standard" | same |
+Question D8:
+D8 — Which selling-cost defaults should liquidation sales use?
+Project/branch/task: S1 engine math review on main.
+ELI10: IRES budgets 8% total to sell a property: 6% realtor commission plus about 1.5-2% closing. Your spec lists 5.5% commission + 1.5% closing + 0.86% Michigan transfer tax (plus concessions in slow markets), which adds up to a slightly different number. Matching IRES's 8% (6% commission + 2% closing including transfer tax) means the report reconciles with their own spreadsheet. Concessions in slow markets stay as a separate line either way.
+Stakes if we pick wrong: every sale number differs from IRES's own math by a few hundred to a few thousand dollars, and they stop trusting the report.
+Recommendation: A because matching the client's own 8% makes the report reconcile with their spreadsheet on day one.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) IRES's 8%: 6% + 2% incl. transfer tax (recommended)
+  ✅ Reconciles with IRES's current 8% budget; two clear lines on the report
+  ✅ Concessions (slow markets) and the 3% off-market as-is commission still apply
+  ❌ Transfer tax isn't shown as its own line
+B) Spec itemization at 6%: 6% + 1.5% + 0.86%
+  ✅ Shows Michigan transfer tax explicitly
+  ❌ Totals 8.36%, which won't match IRES's 8% figure
+Net: reconcile with the client's number vs. finer itemization that doesn't match it.
+Header: Selling costs
+Options:
+A) IRES's 8%: 6% + 2% incl. transfer tax (recommended)
+Defaults: retail sale and rent-scenario terminal sale: commission 6.0% + closing costs incl. MI transfer tax 2.0% (8.0% all-in); land-contract closing: 2.0% closing incl. transfer tax, no commission (spec); concessions 2% if months of supply > 4 (separate line); as-is off-market: 3.0% commission + 2.0% closing. Labeled 'IRES standard', editable per batch; spec Defaults table annotated. Tests: retail on $150,000 ARV → $12,000 selling costs (+ concessions when supply > 4); as-is → 5.0%. Effort: human ~20min / CC ~3min. Low risk.
+B) Spec itemization at 6%: 6% + 1.5% + 0.86%
+Defaults: commission 6.0%, closing 1.5%, transfer tax 0.86%, concessions rule; as-is 3% + 1.5% + 0.86%. Tests: retail → 8.36% (+ concessions). Effort: human ~20min / CC ~3min. Risk: doesn't reconcile with IRES's 8%.
+
+State: approved
+Actual answer: A) IRES's 8%: 6% + 2% (D8, 2026-09-24)
+Accepted scope: Retail and rent-terminal sale: 6.0% commission + 2.0% closing incl. MI transfer tax; LC closing: 2.0% closing incl. transfer tax, no commission; concessions 2% if months of supply > 4 (separate line); as-is off-market: 3.0% + 2.0%. Labeled 'IRES standard', editable per batch; spec Defaults annotated. Tests: retail on 150,000 → 12,000 (+ concessions); as-is 5.0%.
+History: none
+
+### M5: LC default branch — what "4 months' lost payments" means
+Finding: P2, confidence 8/10, spec Defaults "Forfeiture/recovery cost if the buyer defaults | 4 months' lost payments + $3,500 legal + $5,000 turnover repair" and model D "payments received until default (assume month 14) ... property taken back and resold as-is at the month-20 value". Payments after month 14 are already absent in the default branch, so charging "4 months' lost payments" again double-counts; alternatively it means 4 months of IRES carry (taxes/insurance the buyer stops paying) during forfeiture. Reviewer: Claude.
+Plan baseline: spec text (ambiguous).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M4, M8-M10 | approved | fixed | fixed |
+| M5 "4 months lost payments" | ambiguous | interpreted as carry, not a second charge: months 15-20 IRES pays carry (tax, insurance, utilities, loan P&I if any; buyer stopped paying taxes/insurance), $3,500 legal at month 16, $5,000 turnover repair at month 19, resale at month 20 at as-is value × (1+appreciation)^(20/12) less as-is selling costs (M10) and investor payback (M9); payments simply stop after month 14 | literal: subtract 4 × monthly LC payment as an extra cost, plus $3,500 + $5,000, no carry during forfeiture |
+| M6-M7 | pending | pending | pending |
+Question D9:
+D9 — In the land-contract default case, what does "4 months' lost payments" cost IRES?
+Project/branch/task: S1 engine math review on main.
+ELI10: If the buyer stops paying in month 14, IRES already stops receiving payments from that point, so charging "4 months of lost payments" again would count the same loss twice. What IRES does pay during the forfeiture is carrying costs (taxes, insurance, utilities, any loan payment), because the buyer stops covering them. So the default case becomes: payments stop at month 14, IRES carries the house through month 20 plus legal and repair costs, then resells as-is.
+Stakes if we pick wrong: land contracts get penalized twice for the same missed payments, or the forfeiture carrying costs are missed.
+Recommendation: A because it counts each real cost once and captures the carrying costs IRES actually pays during forfeiture.
+Completeness: A=9/10, B=6/10
+Pros / cons:
+A) Payments stop + IRES carries through resale (recommended)
+  ✅ No double count; forfeiture carry, legal ($3,500) and repair ($5,000) all included
+  ✅ Resale at month 20 nets as-is selling costs and investor payback, consistent with M9/M10
+  ❌ Reinterprets the spec's wording; needs a spec annotation
+B) Literal extra charge
+  ✅ Matches the spec's wording exactly
+  ❌ Double-counts missed payments and omits forfeiture carrying costs
+Net: each cost counted once vs. literal wording with a double count.
+Header: LC default costs
+Options:
+A) Payments stop + IRES carries (recommended)
+Default branch: LC payments through month 14 only; months 15-20 IRES pays monthly carry; $3,500 legal at month 16; $5,000 repair at month 19; month-20 as-is resale at as_is_value × (1+appreciation)^(20/12) less M10 as-is selling costs and investor payback (M9); spec annotated. Tests: no payments after 14; carry months 15-20; single legal + repair charge; resale net. Effort: human ~1h / CC ~8min. Low risk.
+B) Literal extra charge
+Default branch: payments through 14; extra cost = 4 × monthly LC payment + $3,500 + $5,000; resale at month 20; no forfeiture carry. Tests: charges. Effort: human ~40min / CC ~5min. Risk: double count.
+
+State: approved
+Actual answer: A) Payments stop + IRES carries (D9, 2026-09-24)
+Accepted scope: Default branch: LC payments through month 14; IRES pays monthly carry months 15-20; 3,500 legal at month 16; 5,000 repair at month 19; month-20 as-is resale at as_is_value × (1+appreciation)^(20/12) less M10 as-is selling costs and investor payback (M9); spec annotated. Tests: payments stop, carry months, single charges, resale net.
+History: none
+
+### M6: "Months to full liquidity" for land contract and rent
+Finding: P2, confidence 8/10, spec Metrics "Months to Full Liquidity | When the owner has their capital fully back in hand" and the 5% tie-break "lower peak capital and faster liquidity". For LC and Rent, capital may never be fully back within 36 months (note still held / property still owned at a hypothetical terminal sale). Without a rule the tie-break compares undefined values. Reviewer: Claude.
+Plan baseline: spec text.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M5, M8-M10 | approved | fixed | fixed |
+| M6 liquidity rule | undefined beyond horizon | first month when cumulative undiscounted cash received ≥ starting equity + additional capital invested, counting only real cash events (sale proceeds, LC down payment/payments/balloon, rent cash flow); the hypothetical terminal sale (Rent) and discounted note value (LC extended) count as liquid at month 36 only in the expected-value sense, shown as "36 (assumed sale)" / "36 (note sale)"; never reached → "> 36" and ranks as slowest in the tie-break | treat terminal values as real cash at month 36 with no label |
+| M7 | pending | pending | pending |
+Question D10:
+D10 — How do we measure "months until IRES has its money back" for land contracts and rentals?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your tie-break prefers the exit that gets IRES's money back fastest. Sales pay out in a few months. Land contracts and rentals may never fully pay back within 3 years, because the 3-year value is partly a pretend sale or a note that could be sold. So the rule counts real cash only, labels month 36 as "assumed sale" or "note sale" when that's what gets IRES whole, and marks "> 36" when nothing does, which ranks it slowest.
+Stakes if we pick wrong: a close call gets decided on a liquidity number that treats a hypothetical sale as cash in hand.
+Recommendation: A because it keeps the tie-break honest about real cash versus assumed sales.
+Completeness: A=9/10, B=6/10
+Pros / cons:
+A) Real cash first, labeled terminal (recommended)
+  ✅ Tie-break compares real cash timing; assumed sales are labeled, not hidden
+  ✅ "> 36" is explicit when capital isn't back within the horizon
+  ❌ One more label to explain in the report
+B) Terminal values as cash at month 36
+  ✅ Every strategy gets a number, no labels
+  ❌ Treats a hypothetical sale or note sale as money in hand
+Net: honest real-cash liquidity vs. a simpler number that blurs assumptions.
+Header: Liquidity rule
+Options:
+A) Real cash first, labeled terminal (recommended)
+months_to_liquidity = first month cumulative real cash ≥ starting equity + additional capital; if reached only via the Rent terminal sale or LC extended note value, value 36 with label 'assumed sale' / 'note sale'; never reached → '> 36' (sorted as slowest; labeled values rank after unlabeled 36). Tests: sell as-is month; LC with balloon; LC extended → '36 (note sale)'; underwater → '> 36'. Effort: human ~45min / CC ~6min. Low risk.
+B) Terminal values as cash at month 36
+Terminal sale and note value counted as cash at month 36, no label. Tests: rule. Effort: human ~20min / CC ~3min.
+
+State: approved
+Actual answer: A) Real cash first, labeled terminal (D10, 2026-09-24)
+Accepted scope: months_to_liquidity = first month cumulative real cash ≥ starting equity + additional capital; if only reached via Rent terminal sale or LC extended note value → 36 labeled 'assumed sale'/'note sale'; never → '> 36' (slowest); labeled values rank after unlabeled 36 in the tie-break. Tests: sell, LC balloon, LC extended, underwater.
+History: none
+
+### M7: Break-even triggers — search method and range
+Finding: P2, confidence 8/10, spec Stress test "Name the break-even point for the recommended strategy: how far can ARV, rent or the rehab budget move before a different strategy wins?" No search method, range, or "no break-even" output is defined. Reviewer: Claude.
+Plan baseline: spec text.
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M6, M8-M10 | approved | fixed | fixed |
+| M7 break-even | unspecified | for each of ARV, market rent, rehab budget independently: scan −50%..+50% of base in 5% steps for the first change of winner, then bisect within that step (≤ 30 iterations, to the nearest $100) on the full ranking (risk-adjusted, M2, with disqualifiers) to find the nearest value where the winner changes; report "If rehab exceeds $38,400, Sell As-Is wins"; none within range → "Holds within ±50%" | fixed ±10% / ±25% steps, report the first step where the winner changes |
+Question D11:
+D11 — How does the engine find "what would change the answer"?
+Project/branch/task: S1 engine math review on main.
+ELI10: Your report says, for example, "If rehab runs over $38K, Sell As-Is becomes better." To compute that, the engine nudges ARV, rent, and the rehab budget one at a time and reruns the ranking until the winner changes. Searching precisely within ±50% gives an exact dollar figure; stepping in fixed jumps (10%, 25%) is simpler but gives rough answers like "somewhere between 10% and 25%".
+Stakes if we pick wrong: the most useful sentence in the report is vague, or misstates the threshold.
+Recommendation: A because it gives an exact, checkable dollar threshold and is still pure fast math.
+Completeness: A=10/10, B=6/10
+Pros / cons:
+A) Precise search within ±50% (recommended)
+  ✅ Exact thresholds ("rehab over $38,400") reused by the narrative verbatim
+  ✅ Pure Python, milliseconds per property; recomputed free on recalculation (D11)
+  ❌ Needs care where rankings flip more than once in the range
+B) Fixed step thresholds
+  ✅ Simple and easy to explain
+  ❌ Only coarse ranges like "between 10% and 25% lower ARV"
+Net: exact thresholds vs. coarse steps.
+Header: Break-even search
+Options:
+A) Precise search within ±50% (recommended)
+break_even(var) for var in (arv, market_rent, rehab_budget): scan ±50% in 5% steps to find the first sign change of (winner − runner-up) score, then bisect within that step (≤ 30 iterations) to the nearest $100; report nearest trigger on each side if any; else 'Holds within ±50%'. Tests: known case with exact threshold; no flip → 'Holds'; multiple flips → nearest to base reported. Effort: human ~2h / CC ~15min. Low risk.
+B) Fixed step thresholds
+Evaluate at ±10%, ±25%, ±50% and report the first step where the winner changes. Tests: steps. Effort: human ~45min / CC ~6min.
+
+State: approved
+Actual answer: A) Precise search within ±50% (D11, 2026-09-24)
+Accepted scope: break_even for ARV, market rent, rehab budget: 5% scan over ±50% for the first winner change, then bisection (≤ 30 iterations) to the nearest $100; nearest trigger each side; else 'Holds within ±50%'; recomputed on free recalculation. Tests: exact threshold, no flip, multiple flips.
+History: none
+
+### N1: Single-property run (founder requirement, 2026-09-24)
+Finding: P1, confidence 9/10. Founder: "We will want a 'Single' run and also a multiple run via upload." The batch design (D3) has only an upload entry; the single-property form was superseded (D5/D6 reopened). Reviewer: founder + Claude.
+Plan baseline: upload-only entry (batch D3).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| M1-M10 | approved | fixed | fixed |
+| N1 single run | none | Owned assets page has two entries: "Analyze one property" and "Upload portfolio". Single = a form with the same inputs as a CSV row (address, city, comps/ARV, rehab quote, taxes, loan payoff/rate/P&I, investor payback, cost basis, notes) plus the batch assumptions line (D12); runs as a 1-row batch through the same queue, engine, report, refund and recalculation paths; 5 tokens | a separate single-property path through /analyze (analysis_type hold) with its own storage and report |
+| N2, N3 | pending | pending | pending |
+Question D12:
+D12 — How should the single-property run work?
+Project/branch/task: S1 engine math review on main (new scope from founder).
+ELI10: You want to analyze one property on its own, not just upload a portfolio. The simplest reliable way is to treat a single property as a batch of one: same form fields as a spreadsheet row, same engine, same report, same refund and free-recalculation rules. Everything is built and tested once. A separate single-property path would duplicate storage, reports and billing.
+Stakes if we pick wrong: two code paths that drift apart, with single reports that don't match batch reports for the same house.
+Recommendation: A because one path means a single report and a batch report of the same property always agree.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Single = a batch of one (recommended)
+  ✅ One engine, one report, one billing/refund path; results identical to the batch view
+  ✅ Single runs appear in the batch list and support free recalculation
+  ❌ A one-property "batch" appears in the batch list (labeled "Single")
+B) Separate single-property path
+  ✅ Single runs stay out of the batch list
+  ❌ Duplicate storage, report and billing logic that can drift from the batch path
+Net: one shared path vs. two parallel ones.
+Header: Single run
+Options:
+A) Single = a batch of one (recommended)
+Owned assets page: two primary actions 'Analyze one property' and 'Upload portfolio'. Single form = one CSV-row's fields + loan/payback/basis + assumptions line (D12), bounds R7/M8, required-field rules; submit creates a 1-row OwnedBatch (labeled 'Single' in the batch list) and opens the property report directly with D7 progress. Tests: single run → same analysis_json as the identical CSV row; label; refund path. Effort: human ~4h / CC ~25min. Low risk.
+B) Separate single-property path
+Single form posts to /analyze (hold) with its own Analysis storage and report rendering. Tests: parity with batch output. Effort: human ~1 day / CC ~45min. Risk: drift.
+
+State: approved
+Actual answer: A) Single = a batch of one (D12, 2026-09-24)
+Accepted scope: Owned assets page actions 'Analyze one property' + 'Upload portfolio'; single form = one CSV row's fields + loan/payback/basis + assumptions line; creates a 1-row OwnedBatch labeled 'Single', opens the report with D7 progress; same engine, billing, refunds, recalculation. Tests: parity with identical CSV row; label; refund.
+History: none
+
+### N2: Spreadsheet formats for upload (founder requirement)
+Finding: P2, confidence 9/10. Founder: "multiple run via upload of spreadsheets". E10 accepts .csv only. web/index.html:13 already loads SheetJS (xlsx 0.18.5), which can read .xlsx/.xls in the browser. Reviewer: founder + Claude.
+Plan baseline: E10 (CSV only).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| N1 | pending | pending | pending |
+| N2 formats | .csv only (E10) | accept .csv, .xlsx, .xls; browser converts the first sheet (or a chosen sheet) to CSV with SheetJS before upload; the server keeps one CSV parser and all E10 limits | server-side Excel parsing with a new Python dependency (openpyxl) |
+| N3 | pending | pending | pending |
+Question D13:
+D13 — How should Excel spreadsheets be accepted for upload?
+Project/branch/task: S1 engine math review on main (new scope from founder).
+ELI10: IRES will often have their inventory or loan list in Excel rather than CSV. PropYield already loads a spreadsheet library in the browser (for exports), so the browser can turn an Excel file into CSV before sending it. The server keeps one parser and all the approved upload limits. Parsing Excel on the server would add a new dependency for the same result.
+Stakes if we pick wrong: staff must re-save every Excel file as CSV, or we add a server dependency we don't need.
+Recommendation: A because it reuses a library already on the page and keeps a single, tested server parser.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Browser converts Excel to CSV (recommended)
+  ✅ No new dependency; SheetJS is already loaded for exports
+  ✅ One server parser and the E10 limits apply to every format
+  ❌ Multi-sheet workbooks need a "pick a sheet" step in the upload
+B) Server-side Excel parsing
+  ✅ Works even if browser scripts fail
+  ❌ New Python dependency and a second parser path to test
+Net: reuse what's on the page vs. add a server dependency.
+Header: Excel upload
+Options:
+A) Browser converts Excel to CSV (recommended)
+Drop zone accepts .csv/.xlsx/.xls (and the optional loans file, D5). For Excel: SheetJS reads the workbook; single sheet → converted; multiple sheets → 'Which sheet?' picker (default first sheet with the required headers); converted CSV uploaded to the same endpoint; E10 limits unchanged (size checked on the original file too). Tests: xlsx fixture → same parsed rows as the CSV fixture; multi-sheet picker; oversized xlsx rejected. Effort: human ~2h / CC ~15min. Low risk.
+B) Server-side Excel parsing
+Add openpyxl; server parses .xlsx directly with the same column mapping. Tests: xlsx fixture parity. Effort: human ~2h / CC ~15min. Risk: new dependency.
+
+State: approved
+Actual answer: A) Browser converts Excel to CSV (D13, 2026-09-24)
+Accepted scope: .csv/.xlsx/.xls accepted; SheetJS converts in-browser (sheet picker for multi-sheet, default first sheet with required headers); same endpoint, parser and E10 limits (size also checked on the original). Tests: xlsx parity, sheet picker, oversize.
+History: none
+
+### N3: Loan statements and other documents (founder requirement)
+Finding: P1, confidence 8/10. Founder: "upload of spreadsheets or other documents like loan statements". Loan payoff, rate and P&I are needed per property (D5, spec); statements are usually PDFs. Extracting fields from PDFs needs a model call, and misread numbers go straight into payoff math. Reviewer: founder + Claude.
+Plan baseline: loan data via CSV columns or Edit drawer (D5).
+Comparison grid:
+| Choice | Current | A | B |
+|---|---|---|---|
+| N1, N2 | pending | pending | pending |
+| N3 documents | none | "Add loan statements" on the preview (single or batch): upload PDFs/images (≤ 20 MB each, ≤ 100 per batch); one model call per document extracts property address, payoff amount, rate, monthly P&I, statement date, lender; matched to rows by address; every extracted value lands in the Edit drawer as "From statement (date) · Confirm" and is NOT used until a person confirms it; confirmed values tagged USER with source "loan statement {date}"; free (no tokens); files deleted after extraction, extracted fields kept | defer: loan data only via spreadsheet columns or the Edit drawer (D5) in v1; statement upload added later |
+Question D14:
+D14 — Should v1 read loan statements (PDFs) to fill in each property's loan?
+Project/branch/task: S1 engine math review on main (new scope from founder).
+ELI10: Typing 60 payoff amounts from loan statements is slow, so reading them automatically is valuable. But an AI misreading "$84,300" as "$34,300" goes straight into the payoff math and changes the recommendation. The safe version extracts the numbers, matches each statement to a property by address, and shows them in the property's edit drawer marked "From statement, please confirm". Nothing is used until someone clicks Confirm. It's free, and the files are deleted after reading.
+Stakes if we pick wrong: a misread payoff silently changes which exit is recommended, or staff type 60 statements by hand.
+Recommendation: A because it saves the typing without ever using an unconfirmed number.
+Note: options differ in kind, not coverage — no completeness score.
+Pros / cons:
+A) Read statements, human confirms (recommended)
+  ✅ Extracts payoff, rate, P&I, date and lender; matched to properties by address
+  ✅ Nothing is used until confirmed; confirmed values tagged with the statement date
+  ❌ One model call per statement (a cost PropYield absorbs) and a confirm step per property
+B) Defer statement reading
+  ✅ No document handling or extraction to build in v1
+  ❌ Staff type loan numbers from statements by hand for every property
+Net: automated extraction with a confirm gate vs. manual entry for now.
+Header: Loan statements
+Options:
+A) Read statements, human confirms (recommended)
+Preview/single form: 'Add loan statements' (PDF/JPG/PNG, ≤ 20 MB each, ≤ 100 per batch). One extraction call per file (JSON: address, payoff, rate, P&I, statement date, lender); matched by normalized address, unmatched listed for manual assignment; values shown in the Edit drawer as 'From statement (date) · Confirm' and excluded from analysis until confirmed; confirmed → USER, source 'loan statement {date}'; statement older than 60 days flagged 'Payoff may be stale'; no tokens charged; files deleted after extraction, fields kept. Tests: extraction parser on fixture JSON; unconfirmed values ignored by engine; address matching; stale flag. Effort: human ~2 days / CC ~1.5h. Medium risk.
+B) Defer statement reading
+Add a TODO; v1 uses spreadsheet columns and the Edit drawer (D5). Effort: none now.
+
+State: approved
+Actual answer: A) Read statements, human confirms (D14, 2026-09-24)
+Accepted scope: 'Add loan statements' (PDF/JPG/PNG ≤ 20 MB, ≤ 100/batch); one extraction call per file (address, payoff, rate, P&I, statement date, lender); address matching with manual assignment for unmatched; values shown as 'From statement (date) · Confirm' and excluded until confirmed; confirmed → USER with source; > 60 days old flagged stale; no tokens; files deleted after extraction. Tests: parser on fixture JSON, unconfirmed ignored, matching, stale flag.
+History: none
+
+Approval readiness (S1 math review): PASS. Checked M1 (D1), M8 (D2), M9 (D5; D3 superseded in History), M2 (D4), M3 (D6), M4 (D7), M10 (D8), M5 (D9), M6 (D10), M7 (D11), N1 (D12), N2 (D13), N3 (D14). Spec annotations required by M2, M3, M5, M10 go into docs/specs/exit-strategy-analyzer-v1.md in the same change as the code.
+
+### S1 engine test plan (tests/test_owned_asset.py, pure unit tests, no model calls)
+```
+[+] owned_asset.py (spec S1 + M-decisions)
+  ├── inputs / pre-flight
+  │   ├── [PLANNED ***] tenant-occupied: extra carry + $2,000 cash-for-keys delays A/B/D
+  │   ├── [PLANNED ***] rehab + contingency > 30% ARV flag; contingency 15%, 20% if pre-1960 or year unknown (S1b)
+  │   ├── [PLANNED ***] due-on-sale flag when loan payoff > 0; LC compliance info when lc_servicer set (S1)
+  │   └── [PLANNED ***] confidence: property-specific DEFAULT count (M3): 0 → High, 6 → Medium, ARV/rent missing → Low
+  ├── carry: tax + insurance + loan P&I + utilities (vacant) + min maintenance   [PLANNED ***]
+  ├── A sell_as_is: DOM + 1 mo; 3% + 2% (M10); − payoff − investor payback (M8)  [PLANNED ***]
+  ├── B rehab_sell: rehab duration 1 mo / $15K (min 1); 6% + 2% + concessions if supply > 4 (M10);
+  │                 financing in Net Profit only (M4); disqualify if profit < 10% of rehab + carry   [PLANNED ***]
+  ├── C rehab_rent: vacancy 8%, maint 8% (5% yrs 1-2), CapEx 5%, mgmt 9% + ½ mo per lease-up, turnover $1,500/24 mo;
+  │                 loan amortized from balance/rate/P&I (negative amortization flagged); month-36 sale
+  │                 at ARV × (1+app)^3 − 8% − remaining loan − investor payback; DSCR < 1.15 or negative CF → disqualified   [PLANNED ***]
+  ├── D land_contract: price ARV + 8%, 10% down, 10%, 30-yr amort; closing 2% (no commission, M10) − loan payoff (E7);
+  │   ├── [PLANNED ***] performing 60%: balloon at 36 − investor payback (M9)
+  │   ├── [PLANNED ***] extended 40%: note at 85% of face at 36 − investor payback (M9)
+  │   ├── [PLANNED ***] default 20%: payments to month 14, carry 15-20, $3,500 legal, $5,000 repair, month-20 resale (M5)
+  │   └── [PLANNED ***] EV blend = 0.8 × performing blend + 0.2 × default; servicing $25/mo
+  ├── metrics: net profit, equity multiple (M1 basis), NPV monthly at 8%, IRR (R11 null+reason),
+  │            peak capital, months to liquidity with labels (M6), effort   [PLANNED ***]
+  ├── stress tests ×7 per strategy (base, rehab +25% & +1 mo, ARV −10%, 0% appreciation, rental stress,
+  │            LC default 40%, combined 2+3+4)   [PLANNED ***]
+  ├── risk score (S1a) + risk-adjusted with negative rule (M2)   [PLANNED ***]
+  ├── ranking: disqualified excluded; within 5% → lower peak capital, then faster liquidity; owner goal tie-break   [PLANNED ***]
+  ├── break-even (M7): exact threshold case, no flip, multiple flips   [PLANNED ***]
+  ├── rounding at render only (D14): engine keeps exact values   [PLANNED ** ]
+  └── recalculation: same stored DATA inputs → identical analysis_json (determinism)   [PLANNED ***]
+[+] document extraction (N3): parser on fixture JSON; unconfirmed values never reach the engine   [PLANNED ***]
+[+] spreadsheet upload (N2): xlsx fixture parses to the same rows as the CSV fixture   [PLANNED ** ]
+[+] single run (N1): 1-row batch produces the same analysis_json as the CSV row   [PLANNED ***]
+LLM: [GAP] [->EVAL] narrative must not contradict analysis_json numbers; manual check on the first IRES batch (no eval suite in repo).
+COVERAGE (planned): all engine paths; GAPS: 1 (eval)
+```
+
+### Implementation Tasks (S1 math review)
+- [ ] **ST1 (P1, human: ~3 days / CC: ~2h)** — engine — implement the spec plus M1-M10 in web/owned_asset.py with the test plan above
+  - Files: web/owned_asset.py, tests/test_owned_asset.py, docs/specs/exit-strategy-analyzer-v1.md (annotations)
+  - Verify: `pytest tests/test_owned_asset.py`
+- [ ] **ST2 (P1, human: ~4h / CC: ~25min)** — inputs — investor_payback + cost_basis (M8) in parser, drawer, bounds, preview flags
+  - Files: web/owned_import.py, web/index.html, web/server.py
+  - Verify: `pytest tests/test_owned_import.py`
+- [ ] **ST3 (P2, human: ~4h / CC: ~25min)** — single run + Excel (N1, N2)
+  - Files: web/index.html, web/server.py
+  - Verify: parity tests; manual xlsx upload
+- [ ] **ST4 (P2, human: ~2 days / CC: ~1.5h)** — loan statement extraction with confirm gate (N3)
+  - Files: web/server.py, web/owned_import.py (matching), web/index.html (drawer confirm)
+  - Verify: fixture tests; manual upload of 3 sample statements
+
+JSONL task artifact: not written (jq is not installed).
+
+### Failure modes (S1)
+| Path | Failure | Handling | User sees |
+|---|---|---|---|
+| Risk-adjusted rank | Negative NPVs | M2 rule, tested | Correct ranking |
+| Payback | Proceeds < loan + payback | M8 shortfall flag | "IRES short $X" |
+| Statement extraction | Misread payoff | N3 confirm gate | Value unused until confirmed |
+| Rent loan | P&I < interest | Negative amortization flag | Flag in report |
+| Break-even | Multiple flips | M7 nearest trigger | Nearest threshold |
+Critical gaps: 0.
+
+### Completion summary (S1 math review)
+- Step 0: scope accepted as-is (2 files; gate not tripped)
+- Architecture: 3 issues (N1-N3 new scope)
+- Code quality / math: 10 issues (M1-M10)
+- Test review: diagram produced, 1 gap (LLM eval)
+- Performance: 0 issues (pure Python; break-even ≈ 3 variables × ~50 evaluations per property)
+- TODOS.md: 0 proposed
+- Failure modes: 0 critical gaps
+- Unresolved decisions: 0
+- Outside voice: codex unavailable (not authenticated; native fallback needs TaskOutput)
+- Lake Score: 8/8 = 10/10
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Outside Review | codex via `/plan-eng-review` and `/plan-design-review` | Independent 2nd opinion | 3 | unavailable | none (codex not authenticated) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 7 | ISSUES OPEN (PLAN) | 11 issues, 0 critical gaps |
+| Outside Review | codex via `/plan-eng-review` and `/plan-design-review` | Independent 2nd opinion | 4 | unavailable | none (codex not authenticated) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 8 | ISSUES OPEN (PLAN) | 13 issues, 0 critical gaps |
 | Design Review | `/plan-design-review` | UI/UX gaps | 3 | CLEAR (FULL) | score: 2/10 → 8/10, 16 decisions |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review and design phases, unavailable (not authenticated). A native Claude subagent completed the design phase with 12 findings, all resolved; native fallback is not outside coverage.
-- **VERDICT:** DESIGN CLEARED. Eng review is not CLEAR: 11 issues found, all with approved remedies, and the S1 spec adoption (founder decision) superseded R1/E8/E9 after that review. eng review required
+- **OUTSIDE COVERAGE:** codex, plan-review and design phases, unavailable (not authenticated). A native Claude subagent completed the design phase (12 findings, resolved); native fallback is not outside coverage.
+- **VERDICT:** DESIGN CLEARED. Eng review is not CLEAR: this pass found 13 issues (M1-M10, N1-N3), all with approved remedies. eng review required
 
 NO UNRESOLVED DECISIONS
