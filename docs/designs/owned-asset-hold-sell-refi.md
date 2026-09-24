@@ -331,6 +331,121 @@ Stop: CONVERGENCE
 > Export file locations (step 5), the JSON contract and markdown fallback (step 4), and effort are now addressed, but the step 7 tests still don't cover the JSON block or the exports, and the inner schema keys are shown only as {...}.
 <!-- gstack:office-hours:concerns:end -->
 
+## UI/UX Specification (/plan-design-review, 2026-09-24)
+
+Calibrated against the existing tokens in web/index.html (no DESIGN.md): `--navy-deep` page, `--navy` cards, `--navy-mid` inputs, `--gold`/`--gold-light` headings and accents, `--green`/`--green-light` positive, Inter, `.pill`, `.stream-content` tables, `risk-badge-*`. Mode: OPERATE (app UI).
+
+### Information architecture [design D3-D6]
+
+Result screen, top to bottom:
+```
++---------------------------------------------------------------+
+| Report header (see Journey)                                   |
++---------------------------------------------------------------+
+| VERDICT BANNER  (Suggested Offer slot, data-pdf-key="offer")  |
+|  HOLD  ·  5-yr IRR 11.2% vs 9.8% refi-then-hold               |
+|  Sell today nets $412,300   [Value: Estimated from comps]     |
++---------------------------------------------------------------+
+| COMPARISON TABLE          Hold      | Sell now | Cash-out refi|
+|  Cash in hand today        —        | $412,300 | $96,400      |
+|  Year-1 cash flow          $14,820  | —        | $6,110       |
+|  DSCR                      1.48     | —        | 1.19         |
+|  5-yr IRR                  11.2%    | —        | 9.8%         |
+|  Net proceeds at year 5    $498,700 | —        | $402,900     |
+|  Total cash returned       $572,400 | $412,300 | $527,600     |
+|  > Year-by-year (collapsed on screen, expanded in PDF)        |
+|  Footnotes (IRR reasons, balloon flag)                        |
++---------------------------------------------------------------+
+| Assumptions block                                             |
++---------------------------------------------------------------+
+| Narrative (streams in)                                        |
++---------------------------------------------------------------+
+```
+- **Verdict banner (D3):** recommended path in caps, one headline comparison, value/rate source chips. Filled from a small verdict JSON fence (`{"type":"hold_verdict","path":"hold|sell|refi","headline":"..."}`) the narrative emits first; until it arrives the banner reads "Recommendation pending..." while the table is already visible. If no verdict fence arrives, the banner is hidden (never guessed).
+- **Table (D4):** exactly six rows as above. Cells that don't apply show "—" with a short reason on hover/focus and in the footnotes (never $0). The best value per row is bold `--green-light`; ties are not highlighted. "Year-by-year" is a collapsed disclosure under the table (Hold and Refi columns), expanded in PDF.
+- **Form (D5):** for `hold`, Asking Price (index.html:290) and Rehab / Construction Cost (:308) are hidden; the "Add property details" toggle stays (beds/baths/sqft/year/type/HOA help comps).
+- **Form (D6):** four groups in this order, each a `<fieldset>` with a visible legend:
+  1. **Loan today:** current balance*, interest rate*, remaining term*, loan maturity, prepayment penalty.
+  2. **Operations:** scheduled monthly rent*, annual opex (excl. taxes, debt)*, annual property tax bill*, vacancy %, capex reserve %.
+  3. **Market overrides:** current value, refi rate. Helper line: "Leave blank and we'll estimate from comps."
+  4. **Assumptions** (collapsed): hold years, rent/expense/appreciation growth, selling cost %, refi LTV, refi term, refi closing %, and the CPA-note fields (acquisition date, purchase price, improvements). Collapsed summary line: "5 yrs · 3/3/3% growth · 7% sell · 75% LTV · Edit"; any value changed from its default renders bold in the summary.
+  `*` = required.
+
+### Interaction states [design D7-D10]
+
+```
+FEATURE          | LOADING                         | EMPTY                          | ERROR                                   | SUCCESS                      | PARTIAL
+-----------------|---------------------------------|--------------------------------|-----------------------------------------|------------------------------|--------------------------------
+Owner form       | —                               | Required fields marked *,      | Inline red text under field, border     | Run button enabled           | "N fields need attention" by
+                 |                                 | defaults prefilled             | #ef4444; server 422 mapped to field     |                              | the button; Run disabled
+Run button       | Spinner + "Running..."          | "Run Hold / Sell / Refi ·      | Balance < 3: disabled, "Need 3 tokens    | —                            | —
+                 |                                 | 3 tokens"; "Balance: N tokens" | (you have N)" + Buy tokens / Ask admin   |                              |
+Progress         | 3 steps with checks: Estimating | —                              | Error card replaces progress (below)    | Steps collapse when          | Step 1 skipped when both
+                 | value & rate → Computing →      |                                |                                         | narrative completes          | overrides given
+                 | Writing recommendation          |                                |                                         |                              |
+Verdict banner   | "Recommendation pending..."     | Hidden if no verdict fence     | Hidden                                  | Path + headline + chips      | —
+Table            | Shown as soon as block arrives  | —                              | Cleared on refunded failures            | 6 rows + footnotes           | Kept on mid-stream failure,
+                 | (visible during analyzing)      |                                |                                         |                              | marked "Incomplete report"
+Narrative        | Streams below table             | —                              | See error cards                         | Full text                    | Partial text + "Incomplete"
+```
+
+- **Loading (D7):** hold uses its own status list driven by SSE status events (`estimating`, `computing`, `writing`), not the rotating acquisition `analysisStatuses`. Unlike other types (whose results are hidden while `analyzing`), the hold table renders as soon as its block arrives.
+- **Validation (D8):** one `HOLD_LIMITS` object in index.html mirrors the R7 server bounds exactly. Errors show as inline text under the field (linked with `aria-describedby`); the Run button stays disabled with "N fields need attention". A server 422 is mapped from `loc` to its field, which is scrolled into view and focused, with the line "No tokens were charged."
+- **Failure cards (D9):** one card per case. Each states the token outcome and the updated balance, has one primary action, and preserves the form values:
+  - **Estimate failed:** "We couldn't find a reliable current value [or refi rate]. 3 tokens refunded." Action "Enter a current value" (or "Enter a refi rate") focuses that override field.
+  - **Narrative failed before starting:** "The report couldn't be written. 3 tokens refunded." Table cleared. Action "Re-run".
+  - **Narrative failed midway:** "Report incomplete. Tokens were not refunded because the analysis had started." Partial report kept and labeled "Incomplete report". Action "Re-run".
+  - **403:** "Hold / Sell / Refi isn't enabled for your company. Contact your PropYield admin."
+  - **402:** prevented before spend (D10); if it still occurs, same copy as the low-balance state.
+- **Point of spend (D10):** with `hold` selected, the button reads "Run Hold / Sell / Refi · 3 tokens" with "Balance: N tokens" beside it. `/api/me` also returns the user's `token_balance` (addition to eng R12). When balance < cost the button is disabled with "Need 3 tokens (you have N)"; tenant admins get a "Buy tokens" link to `/{slug}/admin`, agents get "Ask your admin for tokens."
+
+### User journey [design D11-D12]
+
+```
+STEP | USER DOES                              | USER FEELS                   | PLAN SPECIFIES
+-----|----------------------------------------|------------------------------|--------------------------------------------
+1    | Picks "Hold / Sell / Refi" mode        | Oriented: "this is for my    | Owned-assets mode + description (Pass 7)
+     |                                        | own properties"              |
+2    | Enters ~9 required numbers             | In control, not buried       | 4 fieldsets, assumptions collapsed (D6)
+3    | Sees "Run · 3 tokens", balance         | Knows the cost               | Point-of-spend label + pre-check (D10)
+4    | Waits 1-3 min                          | Progress is real             | 3-step status, table appears early (D7)
+5    | Reads verdict banner, then table       | Answer in 5 seconds          | Verdict banner + 6-row table (D3, D4)
+6    | Checks the numbers vs. their sheet     | Trusts the source labels     | Source chips, footnotes (Pass 4)
+7    | Tweaks LTV, re-runs                    | One edit, not 20             | Form persists + Adjust & re-run (D11)
+8    | Exports PDF for investment committee   | Proud to forward it          | Internal memo header (D12)
+9    | Reopens report next week               | It's all still there         | Re-render from stored JSON block (eng R13)
+```
+Time horizons: 5 seconds, the verdict banner answers "which path?"; 5 minutes, the table plus source chips let the analyst check the numbers against their spreadsheet; long term, reproducible PDFs and what-if re-runs make PropYield the place owned assets get reviewed.
+
+- **Re-run (D11):** owner form values persist for the session after any run, including failures. The result footer has an "Adjust assumptions & re-run" button that scrolls to the form and expands the Assumptions group. The Run button keeps its "· 3 tokens" label.
+- **Report header (D12):** for `hold`, replace the partner header (index.html:397-407) with an internal memo header: tenant logo, title "Hold / Sell / Refi Review", property address, run date, "Prepared by {full_name}", and "Confidential — internal use". Omit the tagline and the "brought to you by" copy. Keep the same light PDF header styling (#f8fafc background, #1e293b title).
+
+### Trust signals [design D13]
+- **Source chips:** "Estimated from comps" (text `--gold-light`, background `rgba(216,168,61,.12)`) or "Your input" (text `--muted`, background `--navy-mid`), shown next to the current value and refi rate in the table header and the verdict banner.
+- **Balloon flag:** existing `risk-badge-medium` reading "Loan matures yr N — refi assumed", in the Hold column header.
+- **Undefined IRR:** "—" plus a superscript marker; the reason is printed in the footnotes directly below the table, on screen and in the PDF (never tooltip-only). The same footnotes carry the "doesn't apply" reasons from D4.
+- **Assumptions block:** expanded in PDF, collapsed on screen; values changed from defaults are bold with a "changed" marker.
+
+### Components and number formatting [design D14]
+- New pieces reuse existing vocabulary: the verdict banner uses the Suggested Offer banner styling (index.html:410), badges use `risk-badge-*`, the table uses `.stream-content` table styles, and form inputs use the existing input styles and `$`-prefix pattern.
+- **Numbers:** currency in whole dollars with commas ($412,300); percents to 1 decimal (11.2%); DSCR to 2 decimals plus "x" (1.48x); negatives use a minus sign and `#ef4444` (−$6,110). Numeric cells are right-aligned with `font-variant-numeric: tabular-nums`. One `fmt` helper in index.html serves the table, banner and PDF. The Excel sheet uses numeric cells with `$#,##0`, `0.0%` and `0.00"x"` formats, not text.
+
+### Responsive and accessibility [design D15-D16]
+- **Mobile, below 640px (D15):** the comparison table sits in the existing `.table-wrap` horizontal scroll. The first (row-label) column is `position: sticky; left: 0` on a `--navy-mid` background, path columns are at least 7rem wide, and a faint right-edge fade hints at more columns. The verdict banner stays above the table, so the answer is visible without scrolling. At 640px and up the full table shows with no scroll. The form's four fieldsets stack in one column on mobile and use the existing 2-4 column grid from 640px.
+- **Accessibility (D16):**
+  - Every input has a visible `<label>` (no placeholder-as-label), and each group is a `<fieldset>` with a `<legend>`.
+  - Errors are linked via `aria-describedby` with `aria-invalid="true"`.
+  - Progress steps and error cards sit in an `aria-live="polite"` region.
+  - The comparison table is a real `<table>` with a `<caption>` and `<th scope="col|row">`.
+  - The Assumptions and Year-by-year disclosures are `<button aria-expanded>`, fully keyboard operable.
+  - The visible focus ring is a 2px `--gold-light` outline. Touch targets are at least 44px.
+  - Color is never the only signal: negatives carry a minus sign, and "best" also gets bold weight.
+
+### Mode picker, super-admin toggle, and units [design D17-D19]
+- **Mode picker (D17):** after the 12 acquisition pills there is a thin `--border` divider and a small `--muted` label "Owned assets", followed by the "Hold / Sell / Refi" pill with a "3 tokens" badge. The group is shown only when `/api/me` returns `asset_analysis_enabled: true`; non-entitled tenants see nothing. `getModeDesc()` text: "Hold, sell, or cash-out refi a property you own, using your loan and rent numbers."
+- **Super-admin toggle (D18):** a new "Hold/Sell/Refi" column in the super.html tenants table. It shows an "On" pill (`rgba(34,197,94,.1)` / `#4ade80`) or an "Off" pill (`--navy-mid` / `--muted`), matching the Active pill (super.html:150-163). Clicking it opens `confirm("Enable Hold/Sell/Refi for {company}? Their users can run 3-token reports.")` (or the Disable wording), then sends `PUT /api/super/tenants/{id}` with `{asset_analysis_enabled}`.
+- **Units (D19):** the form asks for "Remaining term (years)" with the inline hint "0 = interest-only", and "Loan matures in (years, optional)". Both use step 0.5 and allow decimals. index.html converts ×12 (rounded) to `remaining_amort_months` / `loan_maturity_months` before the POST, so the server contract (eng R7, R9) is unchanged. Limits show as 0-40 yrs and 0.1-40 yrs.
+
 ## Engineering Review (/plan-eng-review, 2026-09-24)
 
 Target: docs/designs/owned-asset-hold-sell-refi.md (this file). Report file: this file.
@@ -1192,17 +1307,111 @@ None.
 ## Suppressed findings
 None (no findings below confidence 5).
 
+## Design Review (/plan-design-review, 2026-09-24)
+
+Target: UI scope of this file. Mockups: none (the gstack designer has no OpenAI key on this machine; the user chose a text-only review). Outside voice: a Claude subagent ran (Codex not authenticated, so no outside-model coverage). Its 11 findings were folded into the passes as Issues 1-11. Design decisions D3-D19 are written into "UI/UX Specification" above.
+
+### Pass scores
+| Pass | Before | After | Remaining gap |
+|---|---|---|---|
+| 1 Information architecture | 3 | 9 | none |
+| 2 Interaction states | 2 | 9 | none |
+| 3 User journey | 4 | 9 | none |
+| 4 AI slop risk | 6 | 9 | no hard rejections; mode OPERATE |
+| 5 Design system alignment | 4 | 8 | no DESIGN.md (existing TODO) |
+| 6 Responsive & accessibility | 2 | 9 | none |
+| 7 Unresolved decisions | — | — | 3 resolved (D17-D19), 0 deferred |
+
+Litmus (Pass 4): brand in first screen YES (tenant logo in memo header); one visual anchor YES (verdict banner); scannable by headings YES; one job per section YES; cards necessary YES (existing .card sections only); motion NO motion specified (acceptable for OPERATE); premium without shadows YES.
+
+### NOT in scope (design)
+- Visual mockups: skipped (no OpenAI key); run /design-review on the implemented UI instead.
+- A full DESIGN.md: tracked by the existing "Create a formal DESIGN.md" TODO.
+- Portfolio / batch views: deferred with Approach B (TODO).
+- Motion design: none needed for an OPERATE surface beyond the existing fade-in.
+
+### What already exists (design)
+- The Suggested Offer banner (index.html:410, `data-pdf-key="offer"`) is reused as the verdict banner.
+- `.pill` / `.pills-scroll` mode picker and `getModeDesc()` (index.html:1363) gain the Owned assets group.
+- `.stream-content .table-wrap` horizontal scroll and table styles (index.html:44-47) get a sticky first column.
+- The `risk-badge-*` classes (index.html:49) supply the balloon flag.
+- The "Add property details" collapse pattern (index.html:332) is the model for the Assumptions and Year-by-year disclosures.
+- The `$`-prefixed input pattern (rehab cost, index.html:308) is used for currency fields.
+- The super.html Active/Deactivate row pill (super.html:150-163) is the model for the entitlement toggle.
+
+### TODOS.md updates (design)
+None proposed. All approved fixes are in-scope tasks below; DESIGN.md debt is already tracked.
+
+### Implementation Tasks (design)
+Synthesized from this review's findings. Each task derives from a specific finding above. Run with Claude Code or Codex; checkbox as you ship.
+
+- [ ] **DT1 (P1, human: ~3h / CC: ~20min)** — index.html form — Owned assets pill group (D17); hide Asking Price and Rehab for hold (D5); four fieldsets with collapsed Assumptions summary (D6); years→months conversion (D19); HOLD_LIMITS inline validation + 422 mapping (D8)
+  - Surfaced by: Pass 1 Issues 3-4, Pass 2 Issue 6, Pass 7 Issues 15, 17
+  - Files: web/index.html
+  - Verify: manual run as an entitled tenant; out-of-range value shows inline error and Run stays disabled; server 422 maps to field
+- [ ] **DT2 (P1, human: ~3h / CC: ~25min)** — index.html results — Memo header (D12), verdict banner (D3), 6-row table with N/A treatment, best-value bold and Year-by-year disclosure (D4), source chips, balloon badge, footnotes, assumptions block (D13), fmt helper + tabular numerals (D14), sticky first column below 640px (D15)
+  - Surfaced by: Pass 1 Issues 1-2, Pass 3 Issue 10, Pass 4 Issue 11, Pass 5 Issue 12, Pass 6 Issue 13
+  - Files: web/index.html
+  - Verify: manual at 375px and 1280px; PDF export shows header, banner, footnotes and expanded assumptions
+- [ ] **DT3 (P1, human: ~2h / CC: ~15min)** — index.html states — 3-step progress from SSE status events with table shown during analyzing (D7); five failure cards with token outcome + balance (D9); Run button "· 3 tokens" + balance pre-check (D10); form persists + "Adjust assumptions & re-run" (D11)
+  - Surfaced by: Pass 2 Issues 5, 7, 8; Pass 3 Issue 9
+  - Files: web/index.html, web/server.py (status events `computing`/`writing`; `/api/me` token_balance)
+  - Verify: FakeAnthropicClient test asserts status event order; manual forced failures show the right card and balance
+- [ ] **DT4 (P2, human: ~1h / CC: ~10min)** — accessibility — fieldset/legend, visible labels, aria-describedby/aria-invalid, aria-live region, table caption/th scope, aria-expanded disclosures, 2px --gold-light focus ring, 44px targets (D16)
+  - Surfaced by: Pass 6 Issue 14
+  - Files: web/index.html
+  - Verify: keyboard-only run through form, Run, disclosures; screen reader announces errors and completion
+- [ ] **DT5 (P2, human: ~30min / CC: ~5min)** — super.html — Hold/Sell/Refi column with On/Off pill + confirm (D18)
+  - Surfaced by: Pass 7 Issue 16
+  - Files: web/super.html
+  - Verify: toggle on IRES test tenant; confirm dialog; /api/me reflects change
+- [ ] **DT6 (P2, human: ~20min / CC: ~4min)** — Excel — numeric cells with $#,##0 / 0.0% / 0.00"x" formats in the Hold-Sell-Refi sheet (D14)
+  - Surfaced by: Pass 5 Issue 12
+  - Files: web/index.html (exportExcel)
+  - Verify: open exported .xlsx; cells are numbers, not text
+
+JSONL task artifact: not written (jq is not installed on this machine).
+
+### Unresolved Decisions (design)
+None.
+
+### Completion Summary (design)
+```
+  +====================================================================+
+  |         DESIGN PLAN REVIEW — COMPLETION SUMMARY                    |
+  +====================================================================+
+  | System Audit         | no DESIGN.md; UI scope: mode pill, form,    |
+  |                      | states, results, PDF/Excel, super toggle    |
+  | Step 0               | 3/10 initial; all 7 dimensions              |
+  | Pass 1  (Info Arch)  | 3/10 → 9/10 after fixes                     |
+  | Pass 2  (States)     | 2/10 → 9/10 after fixes                     |
+  | Pass 3  (Journey)    | 4/10 → 9/10 after fixes                     |
+  | Pass 4  (AI Slop)    | 6/10 → 9/10 after fixes                     |
+  | Pass 5  (Design Sys) | 4/10 → 8/10 after fixes                     |
+  | Pass 6  (Responsive) | 2/10 → 9/10 after fixes                     |
+  | Pass 7  (Decisions)  | 3 resolved, 0 deferred                      |
+  +--------------------------------------------------------------------+
+  | NOT in scope         | written (4 items)                           |
+  | What already exists  | written                                     |
+  | TODOS.md updates     | 0 items proposed                            |
+  | Approved Mockups     | 0 generated, 0 approved (no API key)        |
+  | Decisions made       | 17 added to plan (D3-D19)                   |
+  | Decisions deferred   | 0                                           |
+  | Overall design score | 2/10 → 8/10                                 |
+  +====================================================================+
+```
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Outside Review | codex via `/plan-eng-review` | Independent 2nd opinion | 1 | unavailable | none (not authenticated; native fallback unavailable) |
+| Outside Review | codex via `/plan-eng-review` and `/plan-design-review` | Independent 2nd opinion | 2 | unavailable | none (codex not authenticated) |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 6 | ISSUES OPEN (PLAN) | 14 issues, 0 critical gaps |
-| Design Review | `/plan-design-review` | UI/UX gaps | 1 | stale (2026-09-09, other plan) | score: 2/10 → 8/10, 9 decisions |
+| Design Review | `/plan-design-review` | UI/UX gaps | 2 | CLEAR (FULL) | score: 2/10 → 8/10, 17 decisions |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review phase, unavailable (codex not authenticated; the Claude-subagent fallback needs TaskOutput, which this session lacks). No outside findings.
-- **VERDICT:** No reviews CLEAR for this plan. All 14 findings have approved remedies; status stays ISSUES OPEN because issues were found. eng review required
+- **OUTSIDE COVERAGE:** codex, plan-review phase (eng), unavailable; codex, design phase, unavailable (native Claude subagent completed with 11 findings, all folded into design decisions; native fallback is not outside coverage).
+- **VERDICT:** DESIGN CLEARED. Eng review is not CLEAR (14 issues found, all with approved remedies). eng review required
 
 NO UNRESOLVED DECISIONS
