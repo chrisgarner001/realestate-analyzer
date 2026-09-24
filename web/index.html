@@ -103,7 +103,10 @@
       <div x-show="tenant&&tenant.logo_url" x-cloak class="mb-3 flex justify-center">
         <img :src="tenant&&tenant.logo_url" alt="logo" class="h-14 object-contain rounded-lg">
       </div>
-      <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="mb-3 flex justify-center">
+      <div x-show="!brandingLoading&&tenant&&tenant.tier==='solo'&&!tenant.logo_url" x-cloak class="mb-3 flex justify-center">
+        <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-lg brand-accent" :style="{color: tenantAvatarTextColor()}" x-text="tenantInitials()"></div>
+      </div>
+      <div x-show="!brandingLoading&&(!tenant||tenant.tier!=='solo')&&(!tenant||!tenant.logo_url)" x-cloak class="mb-3 flex justify-center">
         <div class="w-14 h-14 rounded-2xl flex items-center justify-center overflow-hidden brand-accent">
           <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
         </div>
@@ -171,7 +174,8 @@
     <div x-show="tenant&&tenant.logo_url" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--navy-mid)">
       <img :src="tenant&&tenant.logo_url" alt="Company logo" class="w-full h-full object-contain">
     </div>
-    <div x-show="!brandingLoading&&(!tenant||!tenant.logo_url)" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--green)">
+    <div x-show="!brandingLoading&&tenant&&tenant.tier==='solo'&&!tenant.logo_url" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 font-bold text-sm" :style="{background: tenant&&tenant.primary_color, color: tenantAvatarTextColor()}" x-text="tenantInitials()"></div>
+    <div x-show="!brandingLoading&&(!tenant||tenant.tier!=='solo')&&(!tenant||!tenant.logo_url)" x-cloak class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden" style="background:var(--green)">
       <img src="/public/propyield_icon.png" alt="PropYield" class="w-full h-full object-cover">
     </div>
     <div>
@@ -1370,6 +1374,25 @@ function app() {
       { id:'listing',      label:'Listing',           desc:'Analyze an active listing — price history, seller motivation' },
       { id:'screen',       label:'Deal Screener',     desc:'Screen for investment opportunities matching your criteria' },
     ],
+
+    // Solo-tenant branded fallback avatar (no logo uploaded yet) — see
+    // docs/designs/self-serve-solo-tenant.md's Initials-derivation rule.
+    tenantInitials() {
+      const words = ((this.tenant && this.tenant.company_name) || '').trim().split(/\s+/).filter(Boolean);
+      if (words.length === 0) return '';
+      if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+      return (words[0][0] + words[1][0]).toUpperCase();
+    },
+    tenantAvatarTextColor() {
+      const hex = ((this.tenant && this.tenant.primary_color) || '#2d8a4e').replace('#', '');
+      const bytes = hex.match(/.{1,2}/g) || ['2d', '8a', '4e'];
+      const [r, g, b] = bytes.map(h => {
+        const c = parseInt(h, 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return luminance > 0.5 ? '#1a1a1a' : '#ffffff';
+    },
 
     async init() {
       marked.setOptions({ breaks: true, gfm: true });

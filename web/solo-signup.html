@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Get Your Own PropYield — Free Property Report</title>
+<link rel="icon" type="image/png" href="/public/propyield_icon.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://js.stripe.com/v3/"></script>
+<style>
+  :root {
+    --navy: #1a2332; --navy-deep: #0f1923; --navy-mid: #243044;
+    --navy-light: #2e3d52; --green: #2d8a4e; --green-light: #38a862;
+    --gold: #c9982e; --gold-light: #e0b043; --text: #e2e8f0;
+    --muted: #94a3b8; --border: #2e3d52; --brand: #2d8a4e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: var(--navy-deep); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
+  .card { background: var(--navy); border: 1px solid var(--border); }
+  input { background: var(--navy-mid); border: 1px solid var(--border); color: var(--text); font-size: 16px !important; }
+  input:focus { outline: none; border-color: var(--brand); }
+  input::placeholder { color: var(--muted); }
+  label { color: var(--muted); }
+  .btn-primary { background: var(--brand); color: white; transition: filter .15s; min-height: 48px; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: .6; cursor: not-allowed; filter: none; }
+  [x-cloak] { display: none !important; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 1.5rem; max-width: 480px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .preview-panel { order: 1; }
+  .form-panel { order: 2; }
+  @media (min-width: 900px) {
+    .layout { grid-template-columns: 1fr 1fr; max-width: 980px; align-items: start; gap: 3rem; padding-top: 4rem; }
+    .preview-panel { order: 2; position: sticky; top: 3rem; }
+    .form-panel { order: 1; }
+  }
+  #card-element { background: var(--navy-mid); border: 1px solid var(--border); border-radius: 0.5rem; padding: 14px; min-height: 48px; }
+  #card-element.StripeElement--focus { border-color: var(--brand); }
+  #card-element.StripeElement--invalid { border-color: #ef4444; }
+  .preview-mock { background: var(--navy-mid); border: 1px solid var(--border); border-radius: 0.75rem; overflow: hidden; }
+  .preview-header { padding: 1.25rem; display: flex; align-items: center; gap: .75rem; }
+  .preview-avatar { width: 3rem; height: 3rem; border-radius: 1rem; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
+  .preview-body { padding: 0 1.25rem 1.25rem; color: var(--muted); font-size: .8rem; line-height: 1.6; }
+  .preview-body .line { height: .5rem; background: var(--navy-light); border-radius: .25rem; margin-bottom: .5rem; }
+</style>
+</head>
+<body x-data="soloSignup()" x-init="init()">
+
+<div class="layout">
+
+  <!-- Live branded preview — the credibility instrument: shows THEIR brand, not PropYield's -->
+  <div class="preview-panel">
+    <p class="text-xs uppercase tracking-wide font-semibold mb-2" style="color:var(--muted)">This is how your report will look</p>
+    <div class="preview-mock">
+      <div class="preview-header" :style="{background: primaryColor}">
+        <div class="preview-avatar" :style="{background:'rgba(255,255,255,.22)', color: avatarTextColor()}" x-text="initials() || '?'"></div>
+        <div>
+          <p class="font-bold text-white" x-text="companyName || 'Your Company Name'"></p>
+          <p class="text-xs" style="color:rgba(255,255,255,.85)">AI-powered property intelligence</p>
+        </div>
+      </div>
+      <div class="preview-body">
+        <p class="font-semibold mb-2" style="color:var(--text)">Property Analysis — 123 Main St</p>
+        <div class="line" style="width:92%"></div>
+        <div class="line" style="width:78%"></div>
+        <div class="line" style="width:85%"></div>
+        <p class="mt-3">Presented by <span x-text="companyName || 'Your Company Name'" :style="{color: primaryColor, fontWeight:600}"></span></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Form -->
+  <div class="form-panel">
+    <h1 class="text-xl font-bold mb-1">Get your own PropYield</h1>
+    <p class="text-sm mb-6" style="color:var(--muted)">Branded property reports you can send to your own clients. Your first report is free.</p>
+
+    <div x-show="step==='error'" x-cloak class="card rounded-xl p-4 mb-4 text-sm" style="border-color:#ef4444;color:#fca5a5">
+      <span x-text="genericError"></span>
+    </div>
+
+    <!-- Step 1: company details -->
+    <form x-show="step==='form'" x-cloak @submit.prevent="startSignup()" class="card rounded-2xl p-5 space-y-4">
+      <div>
+        <label for="company_name" class="block text-xs font-medium mb-1.5">Company / display name</label>
+        <input id="company_name" x-model="companyName" type="text" required maxlength="200"
+          class="w-full rounded-lg px-4 py-3 text-sm" placeholder="Jerry Johnson Realty">
+      </div>
+      <div>
+        <label for="primary_color" class="block text-xs font-medium mb-1.5">Brand color</label>
+        <div class="flex items-center gap-3">
+          <input id="primary_color" x-model="primaryColor" type="color" class="w-12 h-11 rounded-lg cursor-pointer" style="padding:2px">
+          <span class="text-sm" style="color:var(--muted)" x-text="primaryColor"></span>
+        </div>
+      </div>
+      <div>
+        <label for="email" class="block text-xs font-medium mb-1.5">Email address</label>
+        <input id="email" x-model="email" type="email" autocomplete="email" required
+          class="w-full rounded-lg px-4 py-3 text-sm" placeholder="you@example.com">
+      </div>
+      <div>
+        <label for="password" class="block text-xs font-medium mb-1.5">Password</label>
+        <input id="password" x-model="password" type="password" autocomplete="new-password" required minlength="8"
+          class="w-full rounded-lg px-4 py-3 text-sm" placeholder="At least 8 characters">
+      </div>
+      <button type="submit" :disabled="startLoading || !companyName || !email || password.length<8"
+        class="btn-primary w-full rounded-lg py-3 font-semibold text-sm flex items-center justify-center gap-2">
+        <span x-show="!startLoading">Continue</span>
+        <span x-show="startLoading" x-cloak>Working&hellip;</span>
+      </button>
+    </form>
+
+    <!-- Step 2: card verification -->
+    <div x-show="step==='card'" x-cloak class="card rounded-2xl p-5 space-y-4">
+      <p class="text-xs" style="color:var(--muted)">We verify a card to prevent abuse — you won't be charged unless you choose to buy more tokens later.</p>
+      <div>
+        <label class="block text-xs font-medium mb-1.5">Card details</label>
+        <div id="card-element"></div>
+      </div>
+      <div aria-live="polite" x-show="cardError" x-cloak class="text-xs" style="color:#fca5a5" x-text="cardError"></div>
+      <button type="button" @click="completeSignup()" :disabled="completeLoading"
+        class="btn-primary w-full rounded-lg py-3 font-semibold text-sm flex items-center justify-center gap-2">
+        <span x-show="!completeLoading">Get my free report token</span>
+        <span x-show="completeLoading" x-cloak>Verifying&hellip;</span>
+      </button>
+      <button type="button" @click="step='form'" class="w-full text-xs text-center" style="color:var(--muted)">&larr; Back</button>
+    </div>
+
+    <p class="text-xs mt-4 text-center" style="color:var(--muted)">
+      Already have an account? <a :href="'/'" class="underline">Sign in</a>
+    </p>
+  </div>
+
+</div>
+
+<script>
+function soloSignup() {
+  return {
+    step: 'form',
+    companyName: '', email: '', password: '', primaryColor: '#2d8a4e',
+    startLoading: false, completeLoading: false,
+    cardError: '', genericError: '',
+    clientSecret: '', stripe: null, cardElement: null,
+
+    // Same rules as index.html's tenant-branded fallback avatar — see
+    // docs/designs/self-serve-solo-tenant.md's Initials-derivation rule.
+    initials() {
+      const words = this.companyName.trim().split(/\s+/).filter(Boolean);
+      if (words.length === 0) return '';
+      if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+      return (words[0][0] + words[1][0]).toUpperCase();
+    },
+    avatarTextColor() {
+      const hex = (this.primaryColor || '#2d8a4e').replace('#', '');
+      const bytes = hex.match(/.{1,2}/g) || ['2d', '8a', '4e'];
+      const [r, g, b] = bytes.map(h => {
+        const c = parseInt(h, 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return luminance > 0.5 ? '#1a1a1a' : '#ffffff';
+    },
+
+    init() {},
+
+    async startSignup() {
+      this.startLoading = true; this.genericError = '';
+      try {
+        const r = await fetch('/api/signup/solo/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.email, company_name: this.companyName }),
+        });
+        const data = await r.json();
+        if (!r.ok) { this.genericError = data.detail || 'Something went wrong, try again.'; this.step = 'error'; return; }
+        this.clientSecret = data.client_secret;
+        this.stripe = Stripe(data.publishable_key);
+        const elements = this.stripe.elements();
+        this.cardElement = elements.create('card', {
+          style: { base: { color: '#e2e8f0', fontSize: '16px', '::placeholder': { color: '#94a3b8' } }, invalid: { color: '#fca5a5' } },
+        });
+        this.step = 'card';
+        this.$nextTick(() => this.cardElement.mount('#card-element'));
+      } catch (e) {
+        this.genericError = 'Something went wrong, try again.'; this.step = 'error';
+      } finally {
+        this.startLoading = false;
+      }
+    },
+
+    async completeSignup() {
+      this.completeLoading = true; this.cardError = '';
+      try {
+        const result = await this.stripe.confirmCardSetup(this.clientSecret, {
+          payment_method: { card: this.cardElement, billing_details: { email: this.email } },
+        });
+        if (result.error) {
+          this.cardError = result.error.message || 'Card declined. Try a different card.';
+          this.completeLoading = false;
+          return;
+        }
+        const r = await fetch('/api/signup/solo/complete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            setup_intent_id: result.setupIntent.id,
+            email: this.email, password: this.password,
+            company_name: this.companyName, primary_color: this.primaryColor,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) { this.cardError = data.detail || 'Something went wrong, try again.'; this.completeLoading = false; return; }
+        localStorage.setItem('re_token', data.access_token);
+        window.location.href = `/${data.user.slug}/admin`;
+      } catch (e) {
+        this.cardError = 'Something went wrong, try again.';
+        this.completeLoading = false;
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

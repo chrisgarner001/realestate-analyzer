@@ -24,7 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 import database, auth, property_tax
-from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken, MillageRate, TokenPurchase
+from database import get_db, Tenant, User, Analysis, BuyerLead, CredentialRegister, PasswordResetToken, MillageRate, TokenPurchase, RateLimitBucket
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -75,6 +75,28 @@ def get_stripe_client():
     if not key:
         raise HTTPException(500, "STRIPE_SECRET_KEY not set. Add it to your .env file.")
     return stripe.StripeClient(api_key=key)
+
+def _check_rate_limit(db: Session, key: str, limit: int, window_seconds: int):
+    """Fixed-window limiter backed by RateLimitBucket (Postgres), not in-memory —
+    this app is a single Vercel serverless function, so counts must be shared
+    across cold starts/instances rather than reset on every invocation."""
+    now = datetime.utcnow()
+    bucket = db.query(RateLimitBucket).filter_by(key=key).first()
+    if not bucket or bucket.window_start < now - timedelta(seconds=window_seconds):
+        if bucket:
+            bucket.window_start, bucket.count = now, 1
+        else:
+            db.add(RateLimitBucket(key=key, count=1, window_start=now))
+        db.commit()
+        return
+    if bucket.count >= limit:
+        raise HTTPException(429, "Too many requests. Try again later.")
+    bucket.count += 1
+    db.commit()
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug[:80] or "agent"
 
 # $5/token standard rate; $4/token bulk rate at the 100-token pack.
 TOKEN_PACKS = {
@@ -854,9 +876,22 @@ class CreateTenantRequest(BaseModel):
     daily_limit: int = 5
     token_balance: int = 0
 
+class SoloSignupStartRequest(BaseModel):
+    email: str
+    company_name: str = Field(min_length=1, max_length=200)
+
+class SoloSignupCompleteRequest(BaseModel):
+    setup_intent_id: str
+    email: str
+    password: str = Field(min_length=8, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
+    primary_color: str = "#2d8a4e"
+
+FREE_SIGNUP_TOKENS = 1
+
 # ── Routes — ordered: exact paths first, /{slug} catch-alls last ─────────────
 
-RESERVED = {"api", "health", "analyze", "super", "static", "public"}
+RESERVED = {"api", "health", "analyze", "super", "static", "public", "signup", "login"}
 
 @app.get("/")
 async def get_root():
@@ -952,6 +987,89 @@ async def reset_password(req: PasswordResetConfirmRequest, db: Session = Depends
     db.commit()
     return {"ok": True, "message": "Password updated. You can now sign in."}
 
+# ── Solo self-serve signup (public, unauthenticated) ─────────────────────────
+# See docs/designs/self-serve-solo-tenant.md. Nothing is written to the
+# database until the card is verified: /start only creates a Stripe Customer +
+# SetupIntent, so an abandoned signup leaves nothing to clean up or collide
+# with a retry. /complete verifies the SetupIntent server-side and then
+# creates the Tenant + admin User in one transaction.
+
+@app.post("/api/signup/solo/start")
+async def solo_signup_start(req: SoloSignupStartRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(db, key=f"solo_start:{ip}", limit=5, window_seconds=3600)
+
+    email = req.email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(422, "Enter a valid email address")
+    if db.query(User).filter_by(email=email).first():
+        raise HTTPException(400, "Email already in use")
+
+    client = get_stripe_client()
+    customer = client.v1.customers.create({"email": email, "name": req.company_name})
+    setup_intent = client.v1.setup_intents.create({
+        "customer": customer["id"],
+        "usage": "off_session",
+        "metadata": {"purpose": "solo_signup_free_token_gate"},
+    })
+    return {
+        "client_secret": setup_intent["client_secret"],
+        "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY", ""),
+    }
+
+@app.post("/api/signup/solo/complete")
+async def solo_signup_complete(req: SoloSignupCompleteRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(db, key=f"solo_complete:{ip}", limit=10, window_seconds=3600)
+
+    email = req.email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(422, "Enter a valid email address")
+    if db.query(Tenant).filter_by(setup_intent_id=req.setup_intent_id).first():
+        raise HTTPException(400, "This card verification has already been used")
+
+    client = get_stripe_client()
+    try:
+        setup_intent = client.v1.setup_intents.retrieve(req.setup_intent_id)
+    except stripe.InvalidRequestError:
+        raise HTTPException(400, "Invalid card verification session")
+    if setup_intent["status"] != "succeeded":
+        raise HTTPException(400, "Card verification is not complete")
+
+    base_slug = _slugify(req.company_name)
+    slug = base_slug
+    suffix = 1
+    while slug in RESERVED or db.query(Tenant).filter_by(slug=slug).first():
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+
+    try:
+        tenant, admin = _provision_tenant_and_admin(
+            db, slug=slug, company_name=req.company_name, admin_email=email,
+            admin_password=req.password, admin_name=req.company_name,
+            primary_color=req.primary_color, tier="solo",
+            setup_intent_id=req.setup_intent_id,
+        )
+    except IntegrityError:
+        # Same setup_intent_id raced past the check above — the unique
+        # constraint on Tenant.setup_intent_id is the real guard against replay.
+        db.rollback()
+        raise HTTPException(400, "This card verification has already been used")
+
+    admin.token_balance = FREE_SIGNUP_TOKENS
+    db.commit(); db.refresh(admin)
+
+    token = auth.create_token(admin.id, admin.email, admin.role, admin.tenant_id, tenant.slug)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": admin.id, "email": admin.email,
+            "full_name": admin.full_name, "role": admin.role,
+            "tenant_id": admin.tenant_id, "slug": tenant.slug,
+        },
+    }
+
 @app.get("/api/me")
 async def me(current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     tenant = db.query(Tenant).filter_by(id=current_user.tenant_id).first() if current_user.tenant_id else None
@@ -1006,7 +1124,7 @@ async def get_tenant_branding(slug: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Not found")
     return {
         "company_name": tenant.company_name, "logo_url": tenant.logo_url,
-        "primary_color": tenant.primary_color,
+        "primary_color": tenant.primary_color, "tier": tenant.tier or "partner",
         "tagline": tenant.tagline or "AI-powered property intelligence",
         "welcome_message": tenant.welcome_message,
         "contact_name": tenant.contact_name, "contact_phone": tenant.contact_phone,
@@ -1259,6 +1377,9 @@ async def admin_list_users(current_user: User = Depends(auth.require_admin), db:
 
 @app.post("/api/admin/users")
 async def admin_create_user(req: CreateUserRequest, current_user: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter_by(id=current_user.tenant_id).first() if current_user.tenant_id else None
+    if tenant and tenant.tier == "solo":
+        raise HTTPException(403, "Solo accounts are single-user")
     email = req.email.strip().lower()
     existing_user = db.query(User).filter_by(email=email).first()
     if existing_user and (existing_user.tenant_id != current_user.tenant_id or existing_user.is_active):
@@ -1285,6 +1406,9 @@ async def admin_create_user(req: CreateUserRequest, current_user: User = Depends
 
 @app.post("/api/admin/invite")
 async def admin_send_invite(req: SendInviteRequest, current_user: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
+    tenant = db.query(Tenant).filter_by(id=current_user.tenant_id).first() if current_user.tenant_id else None
+    if tenant and tenant.tier == "solo":
+        raise HTTPException(403, "Solo accounts are single-user")
     email = req.email.strip().lower()
     existing_user = db.query(User).filter_by(email=email).first()
     if existing_user and (existing_user.tenant_id != current_user.tenant_id or existing_user.is_active):
@@ -1415,16 +1539,27 @@ def _credit_tenant_tokens(db: Session, session_obj: dict):
     tenant_id = int(session_obj["metadata"]["tenant_id"])
     token_count = int(session_obj["metadata"]["token_count"])
     stripe_session_id = session_obj["id"]
+    tenant = db.query(Tenant).filter_by(id=tenant_id).first()
+    status = "completed"
+    if tenant and tenant.tier == "solo":
+        # Solo tenants are single-user; the purchase Checkout Session's metadata
+        # only carries tenant_id (see docs/designs/self-serve-solo-tenant.md),
+        # so the target user is resolved by the single-admin invariant.
+        admin = db.query(User).filter_by(tenant_id=tenant_id, role="admin", is_active=True).first()
+        if admin:
+            admin.token_balance = (admin.token_balance or 0) + token_count
+        else:
+            status = "uncredited"
+            print(f"Stripe purchase {stripe_session_id} for solo tenant {tenant_id} has no active admin to credit — flagged for manual reconciliation")
+    elif tenant:
+        tenant.token_balance = (tenant.token_balance or 0) + token_count
     try:
         purchase = TokenPurchase(
             tenant_id=tenant_id, stripe_session_id=stripe_session_id,
             token_count=token_count, amount_cents=session_obj.get("amount_total") or 0,
-            currency=session_obj.get("currency") or "usd", status="completed",
+            currency=session_obj.get("currency") or "usd", status=status,
         )
         db.add(purchase)
-        tenant = db.query(Tenant).filter_by(id=tenant_id).first()
-        if tenant:
-            tenant.token_balance = (tenant.token_balance or 0) + token_count
         db.commit()
     except IntegrityError:
         # stripe_session_id already recorded — a webhook retry, not a new purchase.
@@ -1592,29 +1727,70 @@ async def super_update_tenant(
     db.commit()
     return {"ok": True}
 
-@app.post("/api/super/tenants")
-async def super_create_tenant(req: CreateTenantRequest, current_user: User = Depends(auth.require_superadmin), db: Session = Depends(get_db)):
-    slug = req.slug.lower().strip()
-    if slug in RESERVED or not slug.replace("-","").replace("_","").isalnum():
+def _provision_tenant_and_admin(db: Session, *, slug: str, company_name: str, admin_email: str,
+                                admin_password: str, admin_name: Optional[str] = None,
+                                primary_color: str = "#2d8a4e", tagline: str = "AI-powered property intelligence",
+                                welcome_message: Optional[str] = None, contact_name: Optional[str] = None,
+                                contact_phone: Optional[str] = None, contact_email: Optional[str] = None,
+                                contact_nmls: Optional[str] = None, daily_limit: int = 5,
+                                token_balance: int = 0, tier: str = "partner",
+                                setup_intent_id: Optional[str] = None):
+    """Create a Tenant + its first admin User in one transaction. Shared by the
+    superadmin tenant-creation endpoint and the solo self-serve signup flow."""
+    slug = slug.lower().strip()
+    if slug in RESERVED or not slug.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(400, "Invalid or reserved slug")
     if db.query(Tenant).filter_by(slug=slug).first():
         raise HTTPException(400, "Slug already in use")
-    if db.query(User).filter_by(email=req.admin_email).first():
+    if db.query(User).filter_by(email=admin_email).first():
         raise HTTPException(400, "Admin email already in use")
 
-    tenant = Tenant(slug=slug, company_name=req.company_name, primary_color=req.primary_color,
-                    tagline=req.tagline,
-                    welcome_message=req.welcome_message, contact_name=req.contact_name,
-                    contact_phone=req.contact_phone, contact_email=req.contact_email,
-                    contact_nmls=req.contact_nmls, daily_limit=req.daily_limit,
-                    token_balance=req.token_balance)
+    tenant = Tenant(slug=slug, company_name=company_name, primary_color=primary_color,
+                    tagline=tagline, welcome_message=welcome_message, contact_name=contact_name,
+                    contact_phone=contact_phone, contact_email=contact_email,
+                    contact_nmls=contact_nmls, daily_limit=daily_limit,
+                    token_balance=token_balance, tier=tier, setup_intent_id=setup_intent_id)
     db.add(tenant); db.flush()
 
-    admin = User(tenant_id=tenant.id, email=req.admin_email,
-                 password_hash=auth.hash_password(req.admin_password),
-                 full_name=req.admin_name, role="admin")
-    db.add(admin); db.commit()
-    return {"ok": True, "tenant_id": tenant.id, "slug": slug}
+    admin = User(tenant_id=tenant.id, email=admin_email,
+                 password_hash=auth.hash_password(admin_password),
+                 full_name=admin_name, role="admin")
+    db.add(admin); db.commit(); db.refresh(tenant); db.refresh(admin)
+    return tenant, admin
+
+@app.post("/api/super/tenants")
+async def super_create_tenant(req: CreateTenantRequest, current_user: User = Depends(auth.require_superadmin), db: Session = Depends(get_db)):
+    tenant, admin = _provision_tenant_and_admin(
+        db, slug=req.slug, company_name=req.company_name, admin_email=req.admin_email,
+        admin_password=req.admin_password, admin_name=req.admin_name,
+        primary_color=req.primary_color, tagline=req.tagline,
+        welcome_message=req.welcome_message, contact_name=req.contact_name,
+        contact_phone=req.contact_phone, contact_email=req.contact_email,
+        contact_nmls=req.contact_nmls, daily_limit=req.daily_limit,
+        token_balance=req.token_balance, tier="partner",
+    )
+    return {"ok": True, "tenant_id": tenant.id, "slug": tenant.slug}
+
+@app.get("/api/super/solo-conversion")
+async def super_solo_conversion(current_user: User = Depends(auth.require_superadmin), db: Session = Depends(get_db)):
+    """Instrumentation for the solo-tenant wedge: tracks free-token grant ->
+    first-purchase conversion separately from partner-tenant token purchases,
+    since solo-segment purchase psychology is explicitly unvalidated (see
+    docs/designs/self-serve-solo-tenant.md, Premise 4)."""
+    solo_tenant_ids = [row.id for row in db.query(Tenant.id).filter_by(tier="solo").all()]
+    first_purchases = 0
+    if solo_tenant_ids:
+        first_purchases = (
+            db.query(TokenPurchase.tenant_id)
+            .filter(TokenPurchase.tenant_id.in_(solo_tenant_ids), TokenPurchase.status == "completed")
+            .distinct()
+            .count()
+        )
+    return {
+        "solo_tenants_created": len(solo_tenant_ids),
+        "free_tokens_granted": len(solo_tenant_ids),  # every solo tenant is provisioned with exactly one free token
+        "solo_tenants_with_first_purchase": first_purchases,
+    }
 
 @app.get("/api/super/stats")
 async def super_stats(current_user: User = Depends(auth.require_superadmin), db: Session = Depends(get_db)):
@@ -1766,8 +1942,15 @@ async def get_super():
     p = Path(__file__).parent / "super.html"
     return HTMLResponse(p.read_text(encoding="utf-8") if p.exists() else "<h1>super.html not found</h1>")
 
+@app.get("/signup", response_class=HTMLResponse)
+async def get_solo_signup():
+    p = Path(__file__).parent / "solo-signup.html"
+    return HTMLResponse(p.read_text(encoding="utf-8") if p.exists() else "<h1>solo-signup.html not found</h1>")
+
 @app.get("/{slug}/admin", response_class=HTMLResponse)
 async def get_admin(slug: str):
+    if slug in RESERVED:
+        raise HTTPException(404)
     p = Path(__file__).parent / "admin.html"
     return HTMLResponse(p.read_text(encoding="utf-8") if p.exists() else "<h1>admin.html not found</h1>")
 

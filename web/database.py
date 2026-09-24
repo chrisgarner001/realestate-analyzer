@@ -79,6 +79,8 @@ class Tenant(Base):
     is_active       = Column(Boolean,     default=True)
     created_at      = Column(DateTime,    default=datetime.utcnow)
     invite_template = Column(Text)   # admin-saved JSON: master invite email copy + logo
+    tier            = Column(String(20),  default="partner")  # partner | solo
+    setup_intent_id = Column(String(200), unique=True)  # solo signup: consumed Stripe SetupIntent, prevents replay
 
     users    = relationship("User",     back_populates="tenant", cascade="all, delete-orphan")
     analyses = relationship("Analysis", back_populates="tenant")
@@ -187,6 +189,17 @@ class TokenPurchase(Base):
     created_at        = Column(DateTime, default=datetime.utcnow)
 
 
+class RateLimitBucket(Base):
+    """Fixed-window rate-limit counter, shared across serverless instances via
+    Postgres instead of in-memory state (this app is a single Vercel function
+    with no Redis)."""
+    __tablename__ = "rate_limit_buckets"
+    id           = Column(Integer, primary_key=True, index=True)
+    key          = Column(String(300), unique=True, nullable=False, index=True)
+    count        = Column(Integer, nullable=False, default=0)
+    window_start = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
     id           = Column(Integer, primary_key=True, index=True)
@@ -244,6 +257,15 @@ def init_db():
     if "invite_template" not in tenant_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE tenants ADD COLUMN invite_template TEXT"))
+    tenant_columns = {column["name"] for column in inspect(engine).get_columns("tenants")}
+    if "tier" not in tenant_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tenants ADD COLUMN tier VARCHAR(20) DEFAULT 'partner'"))
+    tenant_columns = {column["name"] for column in inspect(engine).get_columns("tenants")}
+    if "setup_intent_id" not in tenant_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tenants ADD COLUMN setup_intent_id VARCHAR(200)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_tenants_setup_intent_id ON tenants (setup_intent_id)"))
 
     # buyer_name/buyer_email became optional; create_all never loosens an
     # existing NOT NULL, so relax it explicitly. SQLite can't ALTER COLUMN at
