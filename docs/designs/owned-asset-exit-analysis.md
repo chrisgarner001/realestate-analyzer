@@ -144,6 +144,30 @@ Ask IRES three things before building: (1) the answers to the Pending Sale, land
 - You went and got the real artifact ("Here is a current report they use") instead of arguing from the plan. It reversed two premises in one file. That's the fastest validation step in this whole session.
 - You came back with a number: "They will pay $25 per property" for "over 60 current properties". That turns a hypothetical module into a $1,500 first order.
 
+## Exit engine spec adoption (S1, founder decision 2026-09-24)
+
+Source: the founder's "Exit Strategy Analyzer: AI Agent System Prompt (v1)", saved as **docs/specs/exit-strategy-analyzer-v1.md** (renamed PropMind.AI → PropYield). Founder decision: use it as the **spec for the Python engine**, not as a prompt that does math.
+
+- `web/owned_asset.py` implements the spec's Defaults table, Pre-flight checks, Scenario models A-D, Comparison metrics, the 7 Stress tests, Break-even triggers and Decision rules, and emits the spec's `analysis_json` exactly.
+- The model does only two things: (1) DATA pulls (as-is comps, ARV comps, market rent, DOM as-is/renovated, appreciation, months of supply / price cuts), each tagged DATA with source; (2) `report_markdown` written from the computed `analysis_json`, following the spec's Output Format and Guardrails (no process narration, point estimates, disclaimer line).
+- Horizon 36 months (spec default), discount rate 8%, itemized selling costs (5.5% + 1.5% + 0.86% MI transfer tax + concessions), and every other value in the spec's Defaults table replace this doc's earlier defaults.
+- **Land-contract compliance (founder, 2026-09-24):** IRES's land contracts are serviced by SGMS, so compliance is handled. New per-tenant setting `lc_servicer` (e.g. "SGMS"): when set, the spec's "Compliance Review Required" flag is downgraded to an info flag "LC servicing and compliance: {lc_servicer}". Tenants without it keep the warning. The disclaimer line stays for everyone. Servicing cost keeps the spec default ($25/mo), editable per batch.
+
+**S1 clarifications (founder, 2026-09-24):**
+- **S1a Risk Score:** `1 + 9 × clamp((base_npv − min(stress_npvs)) ÷ |base_npv|, 0, 1)`, rounded to an integer, +1 per critical risk flag (e.g., LC forfeiture history, rehab + contingency > 30% of ARV), capped at 10. If base_npv = 0, spread = 1. Unit tests: no downside → 1; worst case loses all of base NPV → 10; flag increments and cap.
+- **S1b Missing property facts:** beds/baths/sqft/year built are pulled by the estimate call from public records (tagged DATA with source). If not found, the row still runs with those facts tagged DEFAULT, confidence capped at Low, and a data flag in the summary. The spec's pre-1960 contingency rule (20%) applies only when year built is known; unknown year built uses 20% ("scope unverified"), which is the spec's conservative branch.
+
+**Superseded by S1** (founder explicitly chose the spec over these approved decisions):
+| Prior decision | Replaced by |
+|---|---|
+| R1 year-0 basis = net sale proceeds | Spec Core Principle: starting point = as-is value − loan payoff, same for all strategies |
+| E8 LC default = annual rate with survival weighting | Spec model D: 20% default over 36 mo, default at month 14, forfeiture costs (4 mo + $3,500 + $5,000), resale as-is at month-20 value; balloon 60% paid / 40% extended with note at 15% discount |
+| E9 rank by NPV at 10%, close call within 5% | Spec Decision rules: rank by Risk-Adjusted Score = NPV ÷ (1 + Risk Score × 0.1); within 5% → lower peak capital and faster liquidity win unless goal says otherwise; disqualifiers (Rent DSCR < 1.15 or negative cash flow; Retail profit < 10% of rehab + carry) |
+| Doc defaults (7% selling, $150 utilities, 5% vacancy, 8% mgmt, LC 8%/ARV price, 5-yr hold) | Spec Defaults table |
+| R8 vacancy/reserves (5%/5%) | Spec: vacancy 8%, maintenance 8% (5% yrs 1-2 post-rehab), CapEx 5%, management 9% + ½ month per lease-up, turnover $1,500 / 24 mo |
+
+**Still in force:** R3 refunds, R5 estimate validation (fields now: as-is value, ARV, rent, DOM), R6, R7 bounds (extended to spec inputs), R11 IRR null+reason, R12, R14, E1-E7, E10, E11, and the tax rule (spec's Michigan note agrees).
+
 ## Engineering Re-review (/plan-eng-review, 2026-09-24)
 
 Target: this file (changed/reopened parts only). "Kept" rows in the carry-over table cite prior approvals R1-R14 in docs/designs/owned-asset-hold-sell-refi.md and are not re-asked.
