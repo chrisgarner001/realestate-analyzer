@@ -65,7 +65,7 @@
     </div>
   </div>
   <div class="flex items-center gap-2 text-xs">
-    <span class="chip" x-show="me" x-text="isSuper ? 'Unlimited tokens' : ('Balance ' + (me ? me.token_balance : 0) + ' tokens')"></span>
+    <span class="chip" x-show="me" x-text="free ? 'Free during testing' : isSuper ? 'Unlimited tokens' : ('Balance ' + (me ? me.token_balance : 0) + ' tokens')"></span>
   </div>
 </header>
 
@@ -142,7 +142,7 @@
         <div x-show="singleError" class="text-sm" style="color:var(--red)" x-text="singleError"></div>
         <div class="flex flex-wrap items-center gap-3">
           <button class="btn btn-primary" :disabled="singleBusy||!single.address||!single.city||!canAfford(1)" @click="submitSingle()"
-            x-text="singleBusy ? 'Starting…' : ('Analyze · ' + cost + ' tokens' + (isSuper ? '' : ' · Balance ' + (me?me.token_balance:0)))"></button>
+            x-text="singleBusy ? 'Starting…' : ('Analyze · ' + tokens(1) + (isSuper || free ? '' : ' · Balance ' + (me?me.token_balance:0)))"></button>
           <button class="text-xs muted underline" @click="clearSingle()">Clear form</button>
           <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">You need <span x-text="cost"></span> tokens. Ask your admin to add tokens.</span>
         </div>
@@ -337,7 +337,7 @@
         <div class="flex gap-2">
           <button x-show="queueRunning" class="btn" @click="stopQueue()">Pause</button>
           <button x-show="!queueRunning && failedRows().length" class="btn" :disabled="!canAfford(failedRows().length)" @click="retryFailed()"
-            x-text="'Retry failed rows (' + failedRows().length + ' × ' + cost + ' tokens)'"></button>
+            x-text="'Retry failed rows (' + failedRows().length + (free ? ', free' : ' × ' + cost + ' tokens') + ')'"></button>
         </div>
       </section>
 
@@ -411,14 +411,14 @@
       <!-- Sticky cost footer (D7) -->
       <div x-show="!queueRunning && queuedRows().length" class="card rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 sticky bottom-3">
         <p class="text-sm">
-          <span x-text="queuedRows().length"></span> properties × <span x-text="cost"></span> = <strong x-text="queuedRows().length*cost + ' tokens'"></strong>
-          <span class="muted" x-text="'($' + (queuedRows().length*cost*5).toLocaleString() + ')'"></span>
-          <span class="muted" x-show="!isSuper" x-text="' · Balance ' + (me?me.token_balance:0)"></span>
+          <span x-text="queuedRows().length"></span> properties<span x-show="!free"> × <span x-text="cost"></span></span> = <strong x-text="tokens(queuedRows().length)"></strong>
+          <span class="muted" x-show="!free" x-text="'($' + (queuedRows().length*cost*5).toLocaleString() + ')'"></span>
+          <span class="muted" x-show="!isSuper && !free" x-text="' · Balance ' + (me?me.token_balance:0)"></span>
           <span x-show="batch.unconfirmed_statements" class="chip chip-gold" x-text="batch.unconfirmed_statements + ' statements unconfirmed'"></span>
         </p>
         <div class="flex items-center gap-2">
           <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">Not enough tokens. Ask your admin to add tokens.</span>
-          <button class="btn btn-primary" :disabled="!canAfford(1)" @click="confirmStart()" x-text="'Start · ' + queuedRows().length*cost + ' tokens'"></button>
+          <button class="btn btn-primary" :disabled="!canAfford(1)" @click="confirmStart()" x-text="'Start · ' + tokens(queuedRows().length)"></button>
         </div>
       </div>
     </div>
@@ -668,7 +668,9 @@ function portfolio() {
     ],
     DEFAULTS: null,
 
-    get cost() { return (this.me && this.me.hold_token_cost) || 5; },
+    get cost() { return (this.me && this.me.hold_token_cost != null) ? this.me.hold_token_cost : 5; },
+    get free() { return this.cost === 0; },
+    tokens(n) { return this.free ? 'free during testing' : (n * this.cost) + ' tokens'; },
     get isSuper() { return this.me && this.me.role === 'superadmin'; },
 
     async init() {

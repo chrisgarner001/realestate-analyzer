@@ -339,3 +339,16 @@ class TestStatements:
         st = client.post(f"/api/owned/batches/{setup['batch']['id']}/statements", headers=setup["h"],
                          files={"file": ("notes.docx", b"PK..", "application/octet-stream")}).json()
         assert st["status"] == "not_statement" and fake_anthropic.create_calls == []
+
+
+class TestFreeDuringTesting:
+    def test_zero_cost_runs_without_tokens(self, client, db, fake_anthropic, setup, monkeypatch):
+        monkeypatch.setenv("HOLD_REPORT_TOKEN_COST", "0")
+        u = db.get(User, setup["user"].id)
+        u.token_balance = 0
+        db.commit()
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake_anthropic)
+        assert _row(db, row["id"]).status == "done" and _row(db, row["id"]).debited == 0
+        assert _balance(db, setup["user"]) == 0
+        assert client.get("/api/me", headers=setup["h"]).json()["hold_token_cost"] == 0
