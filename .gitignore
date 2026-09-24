@@ -14,3 +14,6 @@ venv/
 .vercel/
 .DS_Store
 .vercel
+
+# Client property data (IRES exports) — never commit
+Reports/
