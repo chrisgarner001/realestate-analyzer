@@ -1483,6 +1483,70 @@ Critical gaps: 0.
 - Outside voice: codex unavailable (not authenticated; native fallback needs TaskOutput)
 - Lake Score: 8/8 = 10/10
 
+## Single-run and Loan-statement UI (/plan-design-review, 2026-09-24)
+
+Target: N1 single-property form and N3 loan-statement flow. Text-only. A Claude subagent (Codex not authenticated) returned 8 findings, folded into Issues 1-8. Reuses the approved D5 drawer, D7 flags, D8 row states, D9 tab guards, D10 low-balance copy, D11 free recalculation, D12 assumptions line, D13 chips and D16 accessibility.
+
+### Loan statement flow [N-design D3-D7, D10]
+- **Review table (D3):** the preview gets a "Loan statements" step (single runs: an inline panel under the Loan fieldset). One row per statement. Columns: file, matched property, match tier, payoff, rate, P&I, statement date, lender, current spreadsheet/drawer value, status (Pending / Confirmed / Stale / Unmatched / Failed). Values are editable inline; Enter confirms the row and moves to the next. The header reads "41 of 58 confirmed". "Confirm all exact, non-stale matches (N)" sits behind a dialog that lists the N payoffs. After confirmation, the Edit drawer shows the confirmed value and its source.
+- **Start and precedence (D4):** the sticky footer adds "N statements unconfirmed". Start then opens a dialog: "Confirm first" (jumps to the review table) or "Run without them (uses spreadsheet or $0)". The review table shows the spreadsheet value beside the statement value and flags differences over 5% as "Differs from spreadsheet". Precedence: confirmed statement > drawer edit > spreadsheet > $0. The report's Assumptions source reads "loan statement 8/31/26" or "spreadsheet". Statements confirmed after a run apply through free recalculation (D11).
+- **Evidence and retention (D5; reopens N3 retention):** files are stored tenant-scoped (private, no public URLs) until that statement is confirmed or 24 hours pass, then deleted. Extraction returns the page number and bounding boxes for payoff, rate and P&I. A review row opens a side preview of the page with those fields highlighted. Upload copy: "Files are deleted after you confirm them, or within 24 hours." This supersedes N3's "files deleted after extraction".
+- **Extraction states (D6):**
+  - **Meter:** "Reading 23 of 58", announced via aria-live.
+  - **Per-file states:** Reading, Read, Unreadable scan, Password-protected, Not a loan statement, Too large (> 20 MB), Over limit (file 101 and later rejected by name). Failed rows offer "Enter manually" / "Remove".
+  - **Partial reads:** a missing field shows "Not found · enter", and Confirm stays disabled until it's filled (a payoff above 0 requires rate and P&I).
+  - **Duplicates:** when two statements cover one property, the newest is used and the older is marked "Superseded".
+  - **Tab behavior:** extraction runs from the open tab like the batch queue (D9 guards apply), and reopening resumes the remaining files.
+- **Matching (D7):**
+  - **Normalization:** lowercase; strip punctuation; suffix map (St/Street, Ave/Avenue, Dr, Rd, Ct, Ln, Blvd); unit tokens (Apt / Unit / #); directionals (N/S/E/W). Compare street number + street name + city. Ignore lender/borrower mailing blocks when a "Property address" label exists.
+  - **Tiers:** Exact → auto-assigned. Likely (number + street match, city missing or different) → assigned with a "Check match" chip. None → Unmatched, with a searchable property combobox. Assigning a statement to a property that already has one asks "Replace?".
+  - **Multi-property statements:** a statement listing more than one collateral address is labeled "Covers N properties" and never auto-assigned. The user enters each property's release amount.
+- **Stale rule and helpers (D10):**
+  - **Stale** = statement date more than 60 days before the run date. Stale rows show a gold "Stale (N days)" chip, and Confirm becomes "Confirm anyway". A confirmed stale payoff adds the report flag "Payoff from statement dated X (N days old)" and caps confidence at Medium (extends M3).
+  - **Field helpers:** Cost basis: "Purchase + improvements + carrying costs to date". Investor payback: "Fixed amount owed to investors at sale or when a land contract is paid off or sold".
+
+### Single-property form [N-design D8-D9]
+- **Layout (D8), fieldsets in order:**
+  1. **Property:** address\*, city\*, state\* (default MI), portfolio, beds, baths, sqft, year built.
+  2. **Values:** comps/ARV, rehab quote.
+  3. **Carrying:** annual tax, annual insurance.
+  4. **Loan:** payoff, rate, P&I. "Add loan statement" reads one file straight into these fields with a Confirm chip and preview, no matching step.
+  5. **Investor & basis:** investor payback, cost basis.
+  6. **Notes.**
+
+  Each optional field has a helper, e.g. "Blank → estimated from comps · lowers confidence". The field list is generated from the same mapping as the CSV parser (N1 parity). The assumptions line (D12) sits directly above submit.
+- **Submit (D9):**
+  - Label "Analyze · 5 tokens · Balance N"; low balance uses the D10 copy.
+  - Inline validation with the M8/D5/R7 bounds.
+  - Duplicate warning when the same normalized address ran in the last 30 days: "Analyzed 9/24 · View report · Run again (5 tokens)".
+  - The draft is kept in localStorage per user until submitted or cleared.
+  - A failure returns to the filled form with the D9 card copy ("5 tokens refunded" / "not refunded").
+
+| Pass | Before | After | Note |
+|---|---|---|---|
+| 1 Information architecture | 3 | 9 | review table, form grouping |
+| 2 Interaction states | 2 | 9 | extraction states, submit states, Start dialog |
+| 3 User journey | 3 | 9 | confirm flow with evidence; draft + duplicate |
+| 4 AI slop risk | 7 | 9 | OPERATE; 0 hard rejections |
+| 5 Design system | 6 | 8 | reuses tokens; no DESIGN.md |
+| 6 Responsive & a11y | 7 | 8 | D16 applies; statement review desktop-first ("Best on a larger screen", D16) |
+| 7 Decisions | — | — | 0 deferred |
+
+### Implementation Tasks (N-design)
+- [ ] **NT1 (P1, human: ~1.5 days / CC: ~1h)** — statement flow — review table, Start dialog and precedence, file retention + highlighted preview, extraction states, match tiers + multi-property, stale rule (D3-D7, D10)
+  - Files: web/index.html, web/server.py, web/owned_import.py (normalization/matching)
+  - Verify: fixture statements (clean, blurry, password, missing P&I, duplicate, blanket loan); confirm/bulk-confirm; file deleted on confirm and after 24h
+- [ ] **NT2 (P2, human: ~6h / CC: ~35min)** — single form — six fieldsets from the CSV mapping, helpers, one-file statement read, submit states, draft, duplicate warning (D8, D9)
+  - Files: web/index.html, web/server.py
+  - Verify: parity with the identical CSV row; draft survives reload; duplicate warning
+
+JSONL task artifact: not written (jq is not installed).
+
+### Completion Summary (N-design)
+- Overall design score: 2/10 → 8/10 (lowest pass, before → after)
+- Decisions made: 8 (N-design D3-D10); deferred: 0; TODOs proposed: 0
+- Outside voice: Claude subagent completed (8 findings); Codex unavailable
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
@@ -1490,10 +1554,10 @@ Critical gaps: 0.
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
 | Outside Review | codex via `/plan-eng-review` and `/plan-design-review` | Independent 2nd opinion | 4 | unavailable | none (codex not authenticated) |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 8 | ISSUES OPEN (PLAN) | 13 issues, 0 critical gaps |
-| Design Review | `/plan-design-review` | UI/UX gaps | 3 | CLEAR (FULL) | score: 2/10 → 8/10, 16 decisions |
+| Design Review | `/plan-design-review` | UI/UX gaps | 4 | CLEAR (FULL) | score: 2/10 → 8/10, 8 decisions |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review and design phases, unavailable (not authenticated). A native Claude subagent completed the design phase (12 findings, resolved); native fallback is not outside coverage.
-- **VERDICT:** DESIGN CLEARED. Eng review is not CLEAR: this pass found 13 issues (M1-M10, N1-N3), all with approved remedies. eng review required
+- **OUTSIDE COVERAGE:** codex unavailable on all phases (not authenticated). Native Claude subagents completed the design phases (latest: 8 findings, resolved); native fallback is not outside coverage.
+- **VERDICT:** DESIGN CLEARED. Eng review is not CLEAR: 13 issues found in its latest pass, all with approved remedies; N-design D5 also changes N3 file retention, so a follow-up eng check of the storage path is advised. eng review required
 
 NO UNRESOLVED DECISIONS
