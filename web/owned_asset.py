@@ -93,6 +93,8 @@ class Assumptions:
     lc_balloon_paid_prob_pct: float = 60.0
     lc_note_discount_pct: float = 15.0
     lc_servicer: Optional[str] = None               # e.g. "SGMS" downgrades the compliance flag (S1)
+    lc_price_override: Optional[float] = None       # exact LC sale price from the owner (else ARV + premium)
+    include_land_contract: bool = True              # owner can take land contract out of the ranking
     # DOM defaults
     dom_as_is_default_days: int = 60
     dom_renovated_default_days: int = 45
@@ -589,7 +591,7 @@ def rehab_land_contract(r: Resolved, stress: Optional[dict] = None) -> Scenario:
     start = r.vacate_months
     outlays = _rehab_outlays(r, start)
     close = min(start + r.rehab_months + a.lc_marketing_months, h - 1)
-    price = r.arv * (1 + a.lc_price_premium_pct / 100.0)
+    price = a.lc_price_override if a.lc_price_override else r.arv * (1 + a.lc_price_premium_pct / 100.0)
     down = price * a.lc_down_pct / 100.0
     principal = price - down
     pmt = _amortized_payment(principal, a.lc_rate_pct, a.lc_amort_years)
@@ -668,7 +670,8 @@ def rehab_land_contract(r: Resolved, stress: Optional[dict] = None) -> Scenario:
                         "total_interest_earned": interest_earned,
                         "financing_cost": fin_total,
                         "principal": principal, "rate_pct": a.lc_rate_pct, "amort_years": a.lc_amort_years,
-                        "down_pct": a.lc_down_pct, "price_premium_pct": a.lc_price_premium_pct,
+                        "down_pct": a.lc_down_pct,
+                        "price_premium_pct": (price / r.arv - 1) * 100.0 if r.arv else a.lc_price_premium_pct,
                         "balloon_month": h, "balloon_balance": remaining_h,
                         "buyer_monthly_tax": r.annual_tax / 12.0,
                         "buyer_monthly_insurance": r.annual_insurance / 12.0,
@@ -778,6 +781,8 @@ def _run_scenarios(p: PropertyInputs, a: Assumptions, stress: Optional[dict] = N
         "rehab_rent": rehab_rent(r, starting_equity, stress),
         "rehab_land_contract": rehab_land_contract(r, stress),
     }
+    if not a.include_land_contract:
+        scen["rehab_land_contract"].disqualifier = "Not considered: land contract turned off for this property"
     liquidate_now_total = sum(a_s.flows)
     return r, scen, starting_equity, liquidate_now_total
 

@@ -729,6 +729,13 @@ class SingleRunRequest(BaseModel):
     other_owed_at_sale: Optional[float] = Field(None, ge=0, le=5_000_000)
     date_vacant: Optional[date] = None
     arv: Optional[float] = Field(None, gt=0, le=10_000_000)
+    # Land contract option (blank terms = batch defaults)
+    consider_land_contract: bool = True
+    lc_sale_price: Optional[float] = Field(None, gt=0, le=10_000_000)
+    lc_down_pct: Optional[float] = Field(None, ge=0, le=50)
+    lc_rate_pct: Optional[float] = Field(None, ge=0, le=20)
+    lc_term_years: Optional[int] = Field(None, ge=1, le=40)
+    lc_default_pct: Optional[float] = Field(None, ge=0, le=60)
     notes: Optional[str] = Field(None, max_length=4000)
 
 
@@ -758,6 +765,18 @@ async def create_single(req: SingleRunRequest, user: User = Depends(require_owne
     imported = owned_import.ImportedRow(1, fields)
     imported.flags = owned_import._row_flags(fields, date.today())
     batch = _create_batch(db, user, "single", req.address.strip(), [imported])
+    terms = {k: v for k, v in (("lc_price_override", req.lc_sale_price), ("lc_down_pct", req.lc_down_pct),
+                               ("lc_rate_pct", req.lc_rate_pct), ("lc_amort_years", req.lc_term_years),
+                               ("lc_default_prob_pct", req.lc_default_pct)) if v is not None}
+    if terms or not req.consider_land_contract:
+        ov = {}
+        if terms:
+            ov["_lc_terms"] = terms
+        if not req.consider_land_contract:
+            ov["_assumptions"] = {"include_land_contract": False}
+        batch.rows[0].overrides = _dump(ov)
+        db.commit()
+        db.refresh(batch)
     return _batch_json(db, batch, user)
 
 
@@ -976,7 +995,8 @@ async def recalculate(batch_id: int, user: User = Depends(require_owned_access),
     return {"recalculated": n, **_batch_json(db, batch, user)}
 
 
-LC_TERM_FIELDS = {"lc_price_premium_pct", "lc_down_pct", "lc_rate_pct", "lc_amort_years", "lc_default_prob_pct"}
+LC_TERM_FIELDS = {"lc_price_premium_pct", "lc_price_override", "lc_down_pct", "lc_rate_pct", "lc_amort_years",
+                  "lc_default_prob_pct"}
 
 
 class LcTermsRequest(BaseModel):
@@ -1001,10 +1021,8 @@ async def set_lc_terms(batch_id: int, row_id: int, req: LcTermsRequest,
     terms = {} if req.reset else dict(overrides.get("_lc_terms") or {})
     if not req.reset:
         if req.sale_price is not None:
-            arv = next((x["value"] for x in _j(row.analysis, {}).get("assumptions", []) if x["name"] == "arv"), None)
-            if not arv:
-                raise HTTPException(409, "No after-repair value to price the land contract against")
-            terms["lc_price_premium_pct"] = round((req.sale_price / arv - 1) * 100.0, 4)
+            terms["lc_price_override"] = req.sale_price
+            terms.pop("lc_price_premium_pct", None)
         for src, dst in (("down_pct", "lc_down_pct"), ("rate_pct", "lc_rate_pct"),
                          ("term_years", "lc_amort_years"), ("default_prob_pct", "lc_default_prob_pct")):
             if getattr(req, src) is not None:

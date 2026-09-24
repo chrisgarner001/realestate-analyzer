@@ -554,3 +554,54 @@ class TestRowRecalc:
         _run(client, setup, row, fake_anthropic)
         stored = _row(db, row["id"])
         assert "_edited" not in json.loads(stored.overrides)
+
+
+class TestLandContractOnEntry:
+    """Single-entry form: land contract toggle and optional terms."""
+
+    def _single(self, client, setup, fake, **extra):
+        body = {"address": "100 Sample St, Sample Town, MI 48000", **extra}
+        s = client.post("/api/owned/single", headers=setup["h"], json=body).json()
+        row = s["rows"][0]
+        fake.create_texts.append(ESTIMATE)
+        client.post(f"/api/owned/batches/{s['id']}/rows/{row['id']}/run", headers=setup["h"])
+        return s, row
+
+    def _lc(self, db, row):
+        a = json.loads(_row(db, row["id"]).analysis)
+        return next(x for x in a["scenarios"] if x["strategy"] == "rehab_land_contract"), a
+
+    def test_entered_terms_are_used(self, client, db, fake_anthropic, setup):
+        _, row = self._single(client, setup, fake_anthropic, lc_sale_price=165000, lc_down_pct=15,
+                              lc_rate_pct=9.5, lc_term_years=25, lc_default_pct=12)
+        lc, _ = self._lc(db, row)
+        d = lc["details"]
+        assert abs(d["lc_price"] - 165000) < 1 and d["down_pct"] == 15 and d["rate_pct"] == 9.5
+        assert d["amort_years"] == 25 and d["default_prob_pct"] == 12
+
+    def test_blank_terms_use_batch_defaults(self, client, db, fake_anthropic, setup):
+        _, row = self._single(client, setup, fake_anthropic)
+        d = self._lc(db, row)[0]["details"]
+        assert d["down_pct"] == 10 and d["rate_pct"] == 10 and d["amort_years"] == 30
+
+    def test_turned_off_is_ruled_out_not_recommended(self, client, db, fake_anthropic, setup):
+        _, row = self._single(client, setup, fake_anthropic, consider_land_contract=False)
+        lc, a = self._lc(db, row)
+        assert lc["eligible"] is False and lc["disqualifier"].startswith("Not considered")
+        assert a["recommendation"]["strategy"] != "rehab_land_contract"
+        assert "rehab_land_contract" not in (a["recommendation"]["runner_up"] or "")
+
+    def test_can_turn_back_on_from_report(self, client, db, fake_anthropic, setup):
+        s, row = self._single(client, setup, fake_anthropic, consider_land_contract=False)
+        out = client.post(f"/api/owned/batches/{s['id']}/rows/{row['id']}/recalc", headers=setup["h"],
+                          json={"assumptions": {"include_land_contract": True}}).json()
+        lc = next(x for x in out["analysis"]["scenarios"] if x["strategy"] == "rehab_land_contract")
+        assert lc["disqualifier"] is None or not lc["disqualifier"].startswith("Not considered")
+
+    def test_report_price_is_exact_even_after_arv_edit(self, client, db, fake_anthropic, setup):
+        s, row = self._single(client, setup, fake_anthropic)
+        base = f"/api/owned/batches/{s['id']}/rows/{row['id']}"
+        client.post(base + "/lc-terms", headers=setup["h"], json={"sale_price": 150000})
+        out = client.post(base + "/recalc", headers=setup["h"], json={"inputs": {"arv": 180000}}).json()
+        lc = next(x for x in out["analysis"]["scenarios"] if x["strategy"] == "rehab_land_contract")
+        assert abs(lc["details"]["lc_price"] - 150000) < 1

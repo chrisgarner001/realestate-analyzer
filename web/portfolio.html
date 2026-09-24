@@ -156,6 +156,21 @@
           <div><label class="f">Investor exposure</label><input class="w-full" type="number" min="0" x-model="single.investor_exposure" placeholder="$"><p class="help">Owed to investors at sale or LC payoff</p></div>
           <div><label class="f">Other owed at sale</label><input class="w-full" type="number" min="0" x-model="single.other_owed_at_sale" placeholder="$"><p class="help">Liens, back taxes, fees paid from proceeds</p></div>
         </fieldset>
+        <fieldset class="space-y-3">
+          <legend class="text-xs font-semibold mb-2" style="color:var(--gold-light)">Land contract</legend>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" x-model="single.consider_land_contract">
+            Consider selling on land contract
+          </label>
+          <div x-show="single.consider_land_contract" class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div><label class="f">Sale price</label><input class="w-full" type="number" min="0" x-model="single.lc_sale_price" placeholder="$"><p class="help">Blank → 8% over after-repair value</p></div>
+            <div><label class="f">Down payment %</label><input class="w-full" type="number" min="0" max="50" step="0.5" x-model="single.lc_down_pct" placeholder="10"></div>
+            <div><label class="f">Interest rate %</label><input class="w-full" type="number" min="0" max="20" step="0.25" x-model="single.lc_rate_pct" placeholder="10"></div>
+            <div><label class="f">Term (years)</label><input class="w-full" type="number" min="1" max="40" x-model="single.lc_term_years" placeholder="30"></div>
+            <div><label class="f">Default risk %</label><input class="w-full" type="number" min="0" max="60" x-model="single.lc_default_pct" placeholder="20"><p class="help">Chance the buyer stops paying</p></div>
+          </div>
+          <p x-show="!single.consider_land_contract" class="help">The land contract will be shown as not considered and left out of the recommendation.</p>
+        </fieldset>
         <div><label class="f">Other details</label><textarea class="w-full" rows="3" x-model="single.notes" placeholder="Condition, what the rehab covers, forfeiture history, mechanical issues…"></textarea></div>
         <details class="rounded-lg p-3" style="background:var(--navy-mid)">
           <summary class="text-xs font-semibold cursor-pointer">More details (optional)</summary>
@@ -630,9 +645,14 @@
       <section class="card rounded-xl p-5 space-y-4">
         <div class="flex items-center justify-between flex-wrap gap-2">
           <h2 class="font-semibold">Land Contract Sale</h2>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" :checked="lcConsidered(report)" :disabled="lcBusy" @change="toggleLc(report, $event.target.checked)">
+            Consider for this property
+          </label>
           <span x-show="!lcD(report).servicer" class="text-xs" style="color:var(--red)">No servicer set: compliance review required</span>
           <span x-show="lcD(report).servicer" class="text-xs muted" x-text="'Serviced by ' + lcD(report).servicer"></span>
         </div>
+        <p x-show="!lcConsidered(report)" class="text-sm" style="color:var(--gold-light)">Land contract is turned off for this property: it is shown for reference and left out of the recommendation.</p>
 
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div>
@@ -1113,7 +1133,7 @@ function portfolio() {
     async refreshMe() { try { this.me = { ...this.me, ...(await this.api('/api/me')) }; } catch (e) {} },
 
     // ── home ──
-    blankSingle() { return { address: '', rehab_estimate: '', loan_balance: '', date_vacant: '', insurance_monthly: '', utilities_monthly: '', maintenance_monthly: '', security_monthly: '', other_monthly: '', cost_basis: '', investor_exposure: '', other_owed_at_sale: '', notes: '', loan_rate: '', loan_pi: '', annual_tax: '', arv: '' }; },
+    blankSingle() { return { address: '', rehab_estimate: '', loan_balance: '', date_vacant: '', insurance_monthly: '', utilities_monthly: '', maintenance_monthly: '', security_monthly: '', other_monthly: '', cost_basis: '', investor_exposure: '', other_owed_at_sale: '', notes: '', loan_rate: '', loan_pi: '', annual_tax: '', arv: '', consider_land_contract: true, lc_sale_price: '', lc_down_pct: '', lc_rate_pct: '', lc_term_years: '', lc_default_pct: '' }; },
     clearSingle() { this.single = this.blankSingle(); this.singleError = ''; },
     async loadBatches() { try { this.batches = await this.api('/api/owned/batches'); } catch (e) { this.error = e.message; } },
     goHome() { if (this.queueRunning && !confirm('Leaving pauses the batch. Continue?')) return; this.stopQueue(); this.view = 'home'; this.batch = null; history.pushState({}, '', location.pathname); this.loadBatches(); },
@@ -1148,6 +1168,7 @@ function portfolio() {
       const body = {};
       for (const [k, v] of Object.entries(this.single)) {
         if (v === '' || v == null) continue;
+        if (typeof v === 'boolean') { body[k] = v; continue; }
         body[k] = ['address', 'notes', 'date_vacant'].includes(k) ? String(v).trim() : Number(v);
       }
       try {
@@ -1532,6 +1553,19 @@ function portfolio() {
         this.reportEdit = null;
         this.liveMessage = 'Recalculated with your changes';
       } catch (e) { re.error = e.message; re.busy = false; }
+    },
+    lcConsidered(r) { return !((this.scen(r, 'rehab_land_contract').disqualifier || '').startsWith('Not considered')); },
+    async toggleLc(r, on) {
+      this.lcBusy = true; this.lcError = '';
+      try {
+        const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${r.id}/recalc`, { method: 'POST', json: { assumptions: { include_land_contract: on } } });
+        Object.assign(r, resp);
+        const idx = this.batch.rows.findIndex(x => x.id === r.id);
+        if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
+        this.fillLcForm(r);
+        this.liveMessage = on ? 'Land contract included' : 'Land contract left out of the recommendation';
+      } catch (e) { this.lcError = e.message; }
+      finally { this.lcBusy = false; }
     },
     async resetReportAssumptions() {
       const re = this.reportEdit;
