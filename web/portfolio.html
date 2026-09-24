@@ -47,6 +47,10 @@
   .spin { animation: spin 1s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
   [x-cloak] { display: none !important; }
+  .status-icon { animation: statusPulse 1.8s ease-in-out infinite; }
+  @keyframes statusPulse { 0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(45,138,78,.28)} 50%{transform:scale(1.05);box-shadow:0 0 0 10px rgba(45,138,78,0)} }
+  .status-progress { animation: statusProgress 14s ease-in-out infinite; }
+  @keyframes statusProgress { 0%{width:12%} 35%{width:42%} 65%{width:68%} 100%{width:88%} }
   .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(28rem, 100vw); z-index: 70; overflow-y: auto; }
   .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60; }
   label.f { display: block; font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
@@ -106,7 +110,23 @@
       </section>
 
       <!-- Single property entry: a few owner-known numbers; everything else is looked up -->
-      <section x-show="homeTab==='single'" class="card rounded-xl p-5 space-y-5">
+      <section x-show="homeTab==='single' && singleBusy" x-cloak class="card rounded-xl p-5">
+        <div class="py-8 sm:py-12 text-center" role="status" aria-live="polite">
+          <div class="status-icon w-16 h-16 mx-auto rounded-2xl flex items-center justify-center" style="background:rgba(45,138,78,.16);color:var(--green)">
+            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 3v3m0 12v3M3 12h3m12 0h3m-3.64-6.36l-2.12 2.12m-8.48 8.48l-2.12 2.12m0-12.72l2.12 2.12m8.48 8.48l2.12 2.12M9 9l6 6m0-6l-6 6"/>
+            </svg>
+          </div>
+          <p class="mt-5 text-lg font-semibold" style="color:var(--text)" x-text="STATUSES[statusIndex].label"></p>
+          <p class="mt-1 text-sm" style="color:var(--muted)" x-text="STATUSES[statusIndex].detail"></p>
+          <div class="h-1.5 max-w-sm mx-auto mt-6 rounded-full overflow-hidden" style="background:var(--navy-mid)">
+            <div class="status-progress h-full rounded-full" style="background:var(--green)"></div>
+          </div>
+          <p class="mt-3 text-xs" style="color:var(--muted)">Building your property report</p>
+          <p class="mt-2 max-w-md mx-auto text-xs leading-relaxed" style="color:var(--muted)">This report may take up to 3 minutes to complete while we access the necessary data sources and compile the information. Keep this tab open.</p>
+        </div>
+      </section>
+      <section x-show="homeTab==='single' && !singleBusy" class="card rounded-xl p-5 space-y-5">
         <div>
           <h2 class="font-semibold">Analyze one owned property</h2>
           <p class="text-sm muted">Enter what you know. We look up the current value, after-repair value, rent, sales and rent comps, days on market, property facts and property taxes, then compare selling as-is, rehab &amp; sell, rehab &amp; rent and land contract.</p>
@@ -153,7 +173,6 @@
           <button class="text-xs muted underline" @click="clearSingle()">Clear form</button>
           <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">You need <span x-text="cost"></span> tokens. Ask your admin to add tokens.</span>
         </div>
-        <p x-show="singleBusy" class="text-xs muted">Looking up comps, rent and taxes takes about a minute. Keep this tab open.</p>
       </section>
 
       <section class="card rounded-xl overflow-hidden">
@@ -746,8 +765,20 @@
           <div>
             <template x-if="writeupBusy">
               <div>
-                <p class="text-sm muted mb-2"><span class="spin">◌</span> Writing the full report (neighborhood, market, next steps)…</p>
-                <div class="prose-report text-sm" x-html="md(writeupText)"></div>
+                <div class="py-8 sm:py-12 text-center" role="status" aria-live="polite">
+          <div class="status-icon w-16 h-16 mx-auto rounded-2xl flex items-center justify-center" style="background:rgba(45,138,78,.16);color:var(--green)">
+            <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 3v3m0 12v3M3 12h3m12 0h3m-3.64-6.36l-2.12 2.12m-8.48 8.48l-2.12 2.12m0-12.72l2.12 2.12m8.48 8.48l2.12 2.12M9 9l6 6m0-6l-6 6"/>
+            </svg>
+          </div>
+          <p class="mt-5 text-lg font-semibold" style="color:var(--text)" x-text="STATUSES[statusIndex].label"></p>
+          <p class="mt-1 text-sm" style="color:var(--muted)" x-text="STATUSES[statusIndex].detail"></p>
+          <div class="h-1.5 max-w-sm mx-auto mt-6 rounded-full overflow-hidden" style="background:var(--navy-mid)">
+            <div class="status-progress h-full rounded-full" style="background:var(--green)"></div>
+          </div>
+          <p class="mt-3 text-xs" style="color:var(--muted)">Writing the full report: neighborhood, market and next steps</p>
+          <p class="mt-2 max-w-md mx-auto text-xs leading-relaxed" style="color:var(--muted)">This may take up to 2 minutes. The numbers above are final; this adds the written sections.</p>
+        </div>
               </div>
             </template>
             <button x-show="!writeupBusy" class="btn" @click="runWriteup(report)">Generate full report · included</button>
@@ -881,6 +912,14 @@ function portfolio() {
     drawer: null, startDialog: false,
     writeupBusy: false, writeupText: '', writeupError: '',
     lcForm: { sale_price: '', down_pct: '', rate_pct: '', term_years: '', default_prob_pct: '' }, lcBusy: false, lcError: '',
+    statusIndex: 0, statusTimer: null,
+    STATUSES: [
+      { label: 'Connecting to market data', detail: 'Gathering current property and neighborhood information' },
+      { label: 'Pulling in property information', detail: 'Reviewing public records, listings, and comparable sales' },
+      { label: 'Building the financial picture', detail: 'Calculating holding costs, payoffs, and net cash for each exit' },
+      { label: 'Reading public data', detail: 'Checking schools, amenities, trends, and local conditions' },
+      { label: 'Making exit suggestions', detail: 'Comparing sell as-is, rehab & sell, rehab & rent, and land contract' },
+    ],
     STRATS: ['sell_as_is', 'rehab_sell', 'rehab_rent', 'rehab_land_contract'],
     METRICS: [
       { key: 'risk_adjusted_score', label: 'Risk-adjusted value', fmt: 'money', bold: true },
@@ -985,7 +1024,7 @@ function portfolio() {
       } finally { this.uploading = false; }
     },
     async submitSingle() {
-      this.singleBusy = true; this.singleError = '';
+      this.singleBusy = true; this.singleError = ''; this.startStatus();
       const body = {};
       for (const [k, v] of Object.entries(this.single)) {
         if (v === '' || v == null) continue;
@@ -993,7 +1032,8 @@ function portfolio() {
       }
       try {
         const b = await this.api('/api/owned/single', { method: 'POST', json: body });
-        this.showBatch(b);
+        // Stay on the process window (home view) while it runs; the report opens when done.
+        this.showBatch(b); this.view = 'home';
         await this.startQueue();
         const row = this.batch.rows[0];
         if (row && row.status === 'done') {
@@ -1002,7 +1042,7 @@ function portfolio() {
         }
         else if (row) { this.singleError = row.error || 'The analysis did not finish.'; }
       } catch (e) { this.singleError = e.message; }
-      finally { this.singleBusy = false; }
+      finally { this.singleBusy = false; this.stopStatus(); }
     },
 
     // ── batch ──
@@ -1091,6 +1131,16 @@ function portfolio() {
       return v;
     },
     md(t) { return t ? marked.parse(escapeHtml(t)) : ''; },
+    // Same rotating process window as the regular report (3.5 s per step).
+    startStatus() {
+      if (this.statusTimer) return;
+      this.statusIndex = 0;
+      this.statusTimer = setInterval(() => { this.statusIndex = (this.statusIndex + 1) % this.STATUSES.length; }, 3500);
+    },
+    stopStatus() {
+      if (this.singleBusy || this.writeupBusy) return;     // the full report may still be streaming
+      clearInterval(this.statusTimer); this.statusTimer = null;
+    },
     writeupSection(mdText, heading) {
       if (!mdText) return '';
       const lines = mdText.split('\n');
@@ -1282,7 +1332,7 @@ function portfolio() {
       } catch (e) { this.lcError = e.message; } finally { this.lcBusy = false; }
     },
     async runWriteup(r) {
-      this.writeupBusy = true; this.writeupText = ''; this.writeupError = '';
+      this.writeupBusy = true; this.writeupText = ''; this.writeupError = ''; this.startStatus();
       try {
         const resp = await fetch(`/api/owned/batches/${this.batch.id}/rows/${r.id}/writeup`, { method: 'POST', headers: this.h() });
         if (!resp.ok) { let d = ''; try { d = (await resp.json()).detail; } catch (e) {} this.writeupError = d || 'Write-up failed'; return; }
@@ -1301,7 +1351,7 @@ function portfolio() {
         }
         if (!this.writeupError) r.writeup = this.writeupText;
       } catch (e) { this.writeupError = 'Write-up failed'; }
-      finally { this.writeupBusy = false; }
+      finally { this.writeupBusy = false; this.stopStatus(); }
     },
 
     // ── statements ──
