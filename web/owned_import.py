@@ -217,7 +217,7 @@ def _row_flags(f: dict, run_date: date) -> list[str]:
     flags = []
     if not f.get("arv"):
         flags.append("Estimated ARV")
-    if not f.get("rehab_quote"):
+    if f.get("rehab_quote") is None:
         flags.append("Unknown rehab")
     value_as_of = f.get("value_as_of")
     if value_as_of and (run_date - value_as_of).days > 183:
@@ -385,6 +385,10 @@ def row_to_inputs_dict(row: ImportedRow) -> dict:
         "rehab_budget": src("rehab_budget", f.get("rehab_quote")),
         "annual_tax": src("annual_tax", f.get("annual_tax")),
         "annual_insurance": src("annual_insurance", f.get("annual_insurance")),
+        "utilities_monthly": f.get("utilities_monthly"),
+        "maintenance_monthly": f.get("maintenance_monthly"),
+        "security_monthly": f.get("security_monthly"),
+        "other_holding_monthly": f.get("other_holding_monthly"),
         "loan_payoff": f.get("loan_payoff") or 0.0,
         "loan_rate_pct": f.get("loan_rate") or 0.0,
         "loan_pi": f.get("loan_pi") or 0.0,

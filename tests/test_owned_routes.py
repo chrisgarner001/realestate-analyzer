@@ -131,12 +131,10 @@ class TestUpload:
                          headers=setup["h"], json={"include": True})
         assert r.json()["status"] == "queued"
 
-    def test_loan_override_needs_rate_and_pi(self, client, setup):
+    def test_loan_balance_alone_is_accepted(self, client, setup):
         row = setup["batch"]["rows"][0]
         url = f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}"
-        assert client.patch(url, headers=setup["h"], json={"overrides": {"loan_payoff": 40000}}).status_code == 422
-        ok = client.patch(url, headers=setup["h"],
-                          json={"overrides": {"loan_payoff": 40000, "loan_rate_pct": 7.5, "loan_pi": 410}})
+        ok = client.patch(url, headers=setup["h"], json={"overrides": {"loan_payoff": 40000}})
         assert ok.status_code == 200 and "No loan entered" not in ok.json()["flags"]
 
 
@@ -352,3 +350,42 @@ class TestFreeDuringTesting:
         assert _row(db, row["id"]).status == "done" and _row(db, row["id"]).debited == 0
         assert _balance(db, setup["user"]) == 0
         assert client.get("/api/me", headers=setup["h"]).json()["hold_token_cost"] == 0
+
+
+class TestSingleEntry:
+    """Founder layout: address + a few owner-known numbers; the rest is estimated."""
+    BODY = {"address": "100 Sample St, Sample Town, MI 48000", "rehab_estimate": 15000, "loan_balance": 40000,
+            "insurance_monthly": 100, "utilities_monthly": 150, "maintenance_monthly": 75,
+            "security_monthly": 50, "other_monthly": 25, "cost_basis": 95000,
+            "investor_exposure": 30000, "other_owed_at_sale": 2000}
+
+    def test_address_parsed_and_fields_mapped(self, client, setup):
+        s = client.post("/api/owned/single", headers=setup["h"], json=self.BODY).json()
+        f = s["rows"][0]["inputs"]
+        assert (f["address_line"], f["city"], f["state"]) == ("100 Sample St", "Sample Town", "MI")
+        assert f["annual_insurance"] == 1200 and f["investor_payback"] == 32000 and f["rehab_quote"] == 15000
+        assert "No loan entered" not in s["rows"][0]["flags"] and "Unknown rehab" not in s["rows"][0]["flags"]
+
+    def test_run_uses_holding_costs_tax_db_and_default_loan_rate(self, client, db, fake_anthropic, setup, monkeypatch):
+        import property_tax
+        seen = {}
+
+        def fake_tax(**kw):
+            seen.update(kw)
+            from types import SimpleNamespace
+            return SimpleNamespace(selected=SimpleNamespace(annual=3100.0), source="Sample County millage table")
+        monkeypatch.setattr(property_tax, "estimate_property_tax", fake_tax)
+        s = client.post("/api/owned/single", headers=setup["h"], json=self.BODY).json()
+        row = s["rows"][0]
+        fake_anthropic.create_texts.append(ESTIMATE)
+        client.post(f"/api/owned/batches/{s['id']}/rows/{row['id']}/run", headers=setup["h"])
+        stored = _row(db, row["id"])
+        assert stored.status == "done", stored.error
+        a = json.loads(stored.analysis)
+        vals = {x["name"]: x for x in a["assumptions"]}
+        assert vals["annual_tax"]["value"] == 3100 and vals["annual_tax"]["source"] == "DATA"
+        assert seen["owner_occupied"] is False and seen["market_value"] == 80000
+        assert any("assumed 8% interest-only" in f["message"] for f in a["flags"])
+        # vacant carry = tax + insurance + P&I (interest-only 40k @ 8%) + 150 + 75 + 50 + 25
+        carry = -a["scenarios"][0]["monthly_cash_flows"][1]
+        assert round(carry) == round(3100 / 12 + 100 + 40000 * 0.08 / 12 + 300)

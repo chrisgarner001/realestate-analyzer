@@ -105,47 +105,54 @@
         <button class="btn btn-primary" :disabled="!invFile||uploading" @click="upload()" x-text="uploading ? 'Reading file…' : 'Preview properties (free)'"></button>
       </section>
 
-      <!-- Single property form (N-design D8/D9) -->
+      <!-- Single property entry: a few owner-known numbers; everything else is looked up -->
       <section x-show="homeTab==='single'" class="card rounded-xl p-5 space-y-5">
         <div>
           <h2 class="font-semibold">Analyze one owned property</h2>
-          <p class="text-sm muted">Blank fields are estimated from market data and lower the confidence rating.</p>
+          <p class="text-sm muted">Enter what you know. We look up the current value, after-repair value, rent, sales and rent comps, days on market, property facts and property taxes, then compare selling as-is, rehab &amp; sell, rehab &amp; rent and land contract.</p>
         </div>
-        <fieldset class="grid sm:grid-cols-4 gap-3">
-          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Property</legend>
-          <div class="sm:col-span-2"><label class="f">Address *</label><input class="w-full" x-model="single.address" placeholder="12345 Main St"></div>
-          <div><label class="f">City *</label><input class="w-full" x-model="single.city"></div>
-          <div><label class="f">State *</label><input class="w-full" x-model="single.state" maxlength="2"></div>
-          <div><label class="f">Portfolio</label><input class="w-full" x-model="single.portfolio"></div>
-          <div><label class="f">Beds</label><input class="w-full" type="number" x-model="single.beds"></div>
-          <div><label class="f">Baths</label><input class="w-full" type="number" x-model="single.baths"></div>
-          <div><label class="f">Sq ft</label><input class="w-full" type="number" x-model="single.sqft"></div>
-          <div><label class="f">Year built</label><input class="w-full" type="number" x-model="single.year_built"></div>
+        <div>
+          <label class="f" for="s-address">Property address *</label>
+          <input id="s-address" class="w-full" x-model="single.address" placeholder="12345 Main St, Harper Woods, MI 48225" autocomplete="street-address">
+        </div>
+        <fieldset class="grid sm:grid-cols-3 gap-3">
+          <legend class="text-xs font-semibold mb-2 sm:col-span-3" style="color:var(--gold-light)">Rehab &amp; loan</legend>
+          <div><label class="f">Rehab estimate</label><input class="w-full" type="number" min="0" x-model="single.rehab_estimate" placeholder="$"><p class="help">Blank → estimated from condition notes</p></div>
+          <div><label class="f">Loan balance</label><input class="w-full" type="number" min="0" x-model="single.loan_balance" placeholder="$"><p class="help">Payoff amount today. Blank = no loan</p></div>
         </fieldset>
-        <fieldset class="grid sm:grid-cols-4 gap-3">
-          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Values &amp; carrying</legend>
-          <div><label class="f">Comps / ARV</label><input class="w-full" type="number" x-model="single.arv"><p class="help">Blank → estimated from comps</p></div>
-          <div><label class="f">Rehab quote</label><input class="w-full" type="number" x-model="single.rehab_quote"><p class="help">Blank → estimated, flagged</p></div>
-          <div><label class="f">Annual property tax</label><input class="w-full" type="number" x-model="single.annual_tax"></div>
-          <div><label class="f">Annual insurance</label><input class="w-full" type="number" x-model="single.annual_insurance"><p class="help">Blank → $1,200 default</p></div>
+        <fieldset class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <legend class="text-xs font-semibold mb-2 col-span-2 sm:col-span-5" style="color:var(--gold-light)">Monthly holding costs</legend>
+          <div><label class="f">Insurance</label><input class="w-full" type="number" min="0" x-model="single.insurance_monthly" placeholder="$100"></div>
+          <div><label class="f">Utilities</label><input class="w-full" type="number" min="0" x-model="single.utilities_monthly" placeholder="$250"></div>
+          <div><label class="f">Maintenance</label><input class="w-full" type="number" min="0" x-model="single.maintenance_monthly" placeholder="$100"></div>
+          <div><label class="f">Security</label><input class="w-full" type="number" min="0" x-model="single.security_monthly" placeholder="$0"></div>
+          <div><label class="f">Other</label><input class="w-full" type="number" min="0" x-model="single.other_monthly" placeholder="$0"></div>
+          <p class="help col-span-2 sm:col-span-5">Blank uses the amounts shown. Property tax is looked up from the millage database.</p>
         </fieldset>
-        <fieldset class="grid sm:grid-cols-4 gap-3">
-          <legend class="text-xs font-semibold mb-2 col-span-4" style="color:var(--gold-light)">Loan, investor &amp; basis</legend>
-          <div><label class="f">Loan payoff (release amount)</label><input class="w-full" type="number" x-model="single.loan_payoff"></div>
-          <div><label class="f">Interest rate %</label><input class="w-full" type="number" step="0.01" x-model="single.loan_rate"></div>
-          <div><label class="f">Monthly P&amp;I</label><input class="w-full" type="number" x-model="single.loan_pi"></div>
-          <div></div>
-          <div><label class="f">Investor payback</label><input class="w-full" type="number" x-model="single.investor_payback"><p class="help">Fixed amount owed to investors at sale or when a land contract is paid off or sold</p></div>
-          <div><label class="f">Cost basis</label><input class="w-full" type="number" x-model="single.cost_basis"><p class="help">Purchase + improvements + carrying costs to date</p></div>
+        <fieldset class="grid sm:grid-cols-3 gap-3">
+          <legend class="text-xs font-semibold mb-2 sm:col-span-3" style="color:var(--gold-light)">Basis &amp; exposure</legend>
+          <div><label class="f">Current cost basis</label><input class="w-full" type="number" min="0" x-model="single.cost_basis" placeholder="$"><p class="help">Purchase + improvements + carrying costs to date</p></div>
+          <div><label class="f">Investor exposure</label><input class="w-full" type="number" min="0" x-model="single.investor_exposure" placeholder="$"><p class="help">Owed to investors at sale or LC payoff</p></div>
+          <div><label class="f">Other owed at sale</label><input class="w-full" type="number" min="0" x-model="single.other_owed_at_sale" placeholder="$"><p class="help">Liens, back taxes, fees paid from proceeds</p></div>
         </fieldset>
-        <div><label class="f">Notes</label><textarea class="w-full" rows="3" x-model="single.notes" placeholder="Condition, forfeiture history, mechanical issues…"></textarea></div>
+        <div><label class="f">Other details</label><textarea class="w-full" rows="3" x-model="single.notes" placeholder="Condition, what the rehab covers, forfeiture history, mechanical issues…"></textarea></div>
+        <details class="rounded-lg p-3" style="background:var(--navy-mid)">
+          <summary class="text-xs font-semibold cursor-pointer">More details (optional)</summary>
+          <div class="grid sm:grid-cols-4 gap-3 mt-3">
+            <div><label class="f">Loan interest rate %</label><input class="w-full" type="number" step="0.01" min="0" x-model="single.loan_rate"><p class="help">Blank → 8% interest-only</p></div>
+            <div><label class="f">Loan monthly P&amp;I</label><input class="w-full" type="number" min="0" x-model="single.loan_pi"></div>
+            <div><label class="f">Property tax / year (if known)</label><input class="w-full" type="number" min="0" x-model="single.annual_tax"><p class="help">Your actual bill beats the database estimate</p></div>
+            <div><label class="f">After-repair value (if known)</label><input class="w-full" type="number" min="0" x-model="single.arv"></div>
+          </div>
+        </details>
         <div x-show="singleError" class="text-sm" style="color:var(--red)" x-text="singleError"></div>
         <div class="flex flex-wrap items-center gap-3">
-          <button class="btn btn-primary" :disabled="singleBusy||!single.address||!single.city||!canAfford(1)" @click="submitSingle()"
-            x-text="singleBusy ? 'Starting…' : ('Analyze · ' + tokens(1) + (isSuper || free ? '' : ' · Balance ' + (me?me.token_balance:0)))"></button>
+          <button class="btn btn-primary" :disabled="singleBusy||single.address.trim().length<5||!canAfford(1)" @click="submitSingle()"
+            x-text="singleBusy ? 'Researching and comparing…' : ('Analyze · ' + tokens(1) + (isSuper || free ? '' : ' · Balance ' + (me?me.token_balance:0)))"></button>
           <button class="text-xs muted underline" @click="clearSingle()">Clear form</button>
           <span x-show="!canAfford(1)" class="text-xs" style="color:var(--gold-light)">You need <span x-text="cost"></span> tokens. Ask your admin to add tokens.</span>
         </div>
+        <p x-show="singleBusy" class="text-xs muted">Looking up comps, rent and taxes takes about a minute. Keep this tab open.</p>
       </section>
 
       <section class="card rounded-xl overflow-hidden">
@@ -676,8 +683,8 @@ function portfolio() {
     async init() {
       this.token = localStorage.getItem('re_token');
       if (!this.token) { location.href = '/' + this.slug; return; }
-      try { this.single = JSON.parse(localStorage.getItem('owned_single_draft') || 'null') || this.blankSingle(); } catch (e) { this.single = this.blankSingle(); }
-      this.$watch('single', v => { try { localStorage.setItem('owned_single_draft', JSON.stringify(v)); } catch (e) {} }, { deep: true });
+      try { this.single = { ...this.blankSingle(), ...(JSON.parse(localStorage.getItem('owned_single_draft_v2') || 'null') || {}) }; } catch (e) { this.single = this.blankSingle(); }
+      this.$watch('single', v => { try { localStorage.setItem('owned_single_draft_v2', JSON.stringify(v)); } catch (e) {} }, { deep: true });
       const r = await fetch('/api/me', { headers: this.h() });
       if (!r.ok) { localStorage.removeItem('re_token'); location.href = '/' + this.slug; return; }
       this.me = await r.json();
@@ -699,7 +706,7 @@ function portfolio() {
     async refreshMe() { try { this.me = { ...this.me, ...(await this.api('/api/me')) }; } catch (e) {} },
 
     // ── home ──
-    blankSingle() { return { address: '', city: '', state: 'MI', portfolio: '', beds: '', baths: '', sqft: '', year_built: '', arv: '', rehab_quote: '', annual_tax: '', annual_insurance: '', loan_payoff: '', loan_rate: '', loan_pi: '', investor_payback: '', cost_basis: '', notes: '' }; },
+    blankSingle() { return { address: '', rehab_estimate: '', loan_balance: '', insurance_monthly: '', utilities_monthly: '', maintenance_monthly: '', security_monthly: '', other_monthly: '', cost_basis: '', investor_exposure: '', other_owed_at_sale: '', notes: '', loan_rate: '', loan_pi: '', annual_tax: '', arv: '' }; },
     clearSingle() { this.single = this.blankSingle(); this.singleError = ''; },
     async loadBatches() { try { this.batches = await this.api('/api/owned/batches'); } catch (e) { this.error = e.message; } },
     goHome() { if (this.queueRunning && !confirm('Leaving pauses the batch. Continue?')) return; this.stopQueue(); this.view = 'home'; this.batch = null; history.pushState({}, '', location.pathname); this.loadBatches(); },
@@ -734,14 +741,14 @@ function portfolio() {
       const body = {};
       for (const [k, v] of Object.entries(this.single)) {
         if (v === '' || v == null) continue;
-        body[k] = ['address', 'city', 'state', 'portfolio', 'notes'].includes(k) ? String(v) : Number(v);
+        body[k] = ['address', 'notes'].includes(k) ? String(v).trim() : Number(v);
       }
       try {
         const b = await this.api('/api/owned/single', { method: 'POST', json: body });
         this.showBatch(b);
         await this.startQueue();
         const row = this.batch.rows[0];
-        if (row && row.status === 'done') { localStorage.removeItem('owned_single_draft'); this.single = this.blankSingle(); this.openReport(row); }
+        if (row && row.status === 'done') { localStorage.removeItem('owned_single_draft_v2'); this.single = this.blankSingle(); this.openReport(row); }
         else if (row) { this.singleError = row.error || 'The analysis did not finish.'; }
       } catch (e) { this.singleError = e.message; }
       finally { this.singleBusy = false; }

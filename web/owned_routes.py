@@ -29,6 +29,7 @@ import auth
 import database
 import owned_asset
 import owned_import
+import property_tax
 from database import Analysis, OwnedBatch, OwnedBatchRow, OwnedStatement, Tenant, User, get_db
 
 router = APIRouter()
@@ -164,8 +165,6 @@ def _validate_overrides(data: dict) -> dict:
         if not lo <= fv <= hi:
             raise HTTPException(422, f"{k} must be between {lo:,} and {hi:,}")
         clean[k] = fv
-    if (clean.get("loan_payoff") or 0) > 0 and (not clean.get("loan_rate_pct") or not clean.get("loan_pi")):
-        raise HTTPException(422, "A loan payoff above $0 requires the interest rate and monthly P&I")
     return clean
 
 
@@ -202,7 +201,7 @@ def _property_inputs(db: Session, row: OwnedBatchRow, estimates: Optional[dict])
             stale = True
     est = estimates or {}
     for k in ("as_is_value", "arv", "market_rent", "dom_as_is_days", "dom_renovated_days", "appreciation_pct",
-              "months_of_supply", "beds", "baths", "sqft", "year_built"):
+              "months_of_supply", "beds", "baths", "sqft", "year_built", "annual_tax"):
         if base.get(k) is None and est.get(k) is not None:
             base[k] = est[k]
             sources[k] = "DATA"
@@ -232,15 +231,24 @@ def _needs_estimate(row: OwnedBatchRow) -> bool:
 
 # ── model prompts ───────────────────────────────────────────────────────────
 
-ESTIMATE_SYSTEM = """You are a real estate data researcher for a Michigan single-family rental owner.
-Use web search to find current market data for ONE property. Return ONLY a JSON object, no other text:
+ESTIMATE_SYSTEM = """You are a real estate data researcher for an owner deciding what to do with a property they already own.
+Use web search (Zillow, Redfin, Realtor.com, county records) to find current market data for ONE property.
+Method (same as the PropYield comps and rental analyses):
+- Sales comps: closed sales within 180 days and 0.5 miles of similar size and age. If fewer than three, expand to 365 days
+  or 1 mile. Use similar-condition sales for the as-is value and renovated sales for the ARV.
+- Rent comps: same neighborhood or within 1 mile, last 90 days, similar beds/baths, renovated condition.
+- Property facts (beds, baths, sqft, year built) and the county come from listing sites or county records.
+- Rehab: when no rehab estimate is given, estimate the cost to bring it to retail-ready condition from the notes,
+  age and size, at local contractor pricing.
+Return ONLY a JSON object, no other text:
 {"as_is_value": <number, current value in present condition from similar-condition sales in the last 6 months within 0.5 mi, widen if needed>,
  "arv": <number, after-repair value from renovated comps>,
  "market_rent": <number, monthly rent after rehab from rent comps>,
  "dom_as_is_days": <number>, "dom_renovated_days": <number>,
  "appreciation_pct": <number, local 5-year average annual appreciation>,
  "months_of_supply": <number>,
- "rehab_estimate": <number, cost to bring it to retail-ready condition from the notes, age and size; null if the rehab quote is given>,
+ "rehab_estimate": <number, cost to bring it to retail-ready condition; null if a rehab estimate is given>,
+ "county": "<county name without the word County, or null>", "school_district": "<name or null>",
  "beds": <number or null>, "baths": <number or null>, "sqft": <number or null>, "year_built": <number or null>,
  "sources": {"as_is_value": "...", "arv": "...", "market_rent": "...", "appreciation_pct": "...", "facts": "..."},
  "comps": [{"address": "...", "price": <number>, "date": "YYYY-MM-DD", "condition": "..."}]}
@@ -310,9 +318,12 @@ def _estimate(row: OwnedBatchRow) -> dict:
     s = _server()
     fields = _j(row.inputs, {}) or {}
     ov = _j(row.overrides, {}) or {}
-    prompt = (f"Property: {fields.get('address_line')}, {fields.get('city')}, {fields.get('state') or 'MI'}\n"
+    where = fields.get("full_address") or f"{fields.get('address_line')}, {fields.get('city')}, {fields.get('state') or 'MI'}"
+    rehab = fields.get("rehab_quote")
+    rehab_text = f"${rehab:,.0f}" if rehab is not None else "not given, estimate it"
+    prompt = (f"Property: {where}\n"
               f"Status: {fields.get('status') or 'Vacant'}. Owner's comps value: {fields.get('arv') or 'unknown'}. "
-              f"Rehab quote: {fields.get('rehab_quote') or 'unknown'}.\n"
+              f"Owner's rehab estimate: {rehab_text}.\n"
               f"Notes: {(fields.get('notes') or '')[:800]}\n"
               f"Known overrides: {json.dumps(ov)}")
     client = s.get_client()
@@ -322,11 +333,40 @@ def _estimate(row: OwnedBatchRow) -> dict:
     data = _extract_json(_last_text(resp))
     if data is None:
         raise ValueError("estimate response was not JSON")
-    out = {"sources": data.get("sources") or {}, "comps": data.get("comps") or []}
+    out = {"sources": data.get("sources") or {}, "comps": data.get("comps") or [],
+           "county": data.get("county"), "school_district": data.get("school_district")}
     for k in ("as_is_value", "arv", "market_rent", "dom_as_is_days", "dom_renovated_days", "appreciation_pct",
               "months_of_supply", "rehab_estimate", "beds", "baths", "sqft", "year_built"):
         out[k] = _num(data.get(k))
     return out
+
+
+def _add_tax_estimate(db: Session, row: OwnedBatchRow, est: dict):
+    """Property tax from the millage database when the owner didn't enter it (non-homestead).
+
+    Based on current market value, so it can overstate a long-held Michigan property whose
+    taxable value is capped; the owner's actual bill always wins."""
+    fields = _j(row.inputs, {}) or {}
+    ov = _j(row.overrides, {}) or {}
+    if fields.get("annual_tax") is not None or ov.get("annual_tax") is not None:
+        return
+    value = est.get("as_is_value") or ov.get("as_is_value") or fields.get("arv") or est.get("arv")
+    if not value:
+        return
+    try:
+        s = _server()
+        where = fields.get("full_address") or f"{fields.get('address_line')}, {fields.get('city')}, {fields.get('state') or 'MI'}"
+        tax = property_tax.estimate_property_tax(
+            market_value=value, state=fields.get("state") or "MI", address=where,
+            county=est.get("county"), jurisdiction=fields.get("city") or None,
+            school_district=est.get("school_district"), owner_occupied=False,
+            millage_lookup=s._millage_lookup_factory(db))
+    except Exception as e:  # advisory: the engine falls back to $0 and flags it
+        print(f"Owned tax estimate failed for row {row.id}: {e}")
+        return
+    if tax.selected:
+        est["annual_tax"] = round(tax.selected.annual, 2)
+        est.setdefault("sources", {})["annual_tax"] = f"millage database: {tax.source}"
 
 
 def _validate_estimate(row: OwnedBatchRow, est: dict) -> Optional[str]:
@@ -580,42 +620,73 @@ async def upload_batch(file: UploadFile = File(...), loans_file: Optional[Upload
     return out
 
 
+ADDRESS_RE = re.compile(r"^\s*(?P<line>[^,]+?)\s*,\s*(?P<city>[^,]+?)\s*(?:,\s*(?P<state>[A-Za-z]{2})\b)?\s*(?P<zip>\d{5})?\s*$")
+
+
+def split_address(full: str) -> tuple[str, str, str]:
+    """'123 Main St, Harper Woods, MI 48225' -> (line, city, state). Best effort."""
+    m = ADDRESS_RE.match(full or "")
+    if not m:
+        return full.strip(), "", "MI"
+    city = m.group("city")
+    state = m.group("state")
+    if not state:                       # "Harper Woods MI 48225" without the second comma
+        cm = re.match(r"^(.*?)\s+([A-Za-z]{2})$", city.strip())
+        if cm:
+            city, state = cm.group(1), cm.group(2)
+    return m.group("line").strip(), city.strip(), (state or "MI").upper()
+
+
 class SingleRunRequest(BaseModel):
-    address: str = Field(min_length=3, max_length=300)
-    city: str = Field(min_length=1, max_length=120)
-    state: str = Field("MI", min_length=2, max_length=2)
-    portfolio: Optional[str] = None
-    beds: Optional[float] = Field(None, ge=0, le=20)
-    baths: Optional[float] = Field(None, ge=0, le=20)
-    sqft: Optional[float] = Field(None, ge=100, le=20000)
-    year_built: Optional[int] = Field(None, ge=1800, le=2030)
-    arv: Optional[float] = Field(None, gt=0, le=10_000_000)
-    rehab_quote: Optional[float] = Field(None, ge=0, le=500_000)
-    annual_tax: Optional[float] = Field(None, ge=0, le=100_000)
-    annual_insurance: Optional[float] = Field(None, ge=0, le=20_000)
-    loan_payoff: Optional[float] = Field(None, ge=0, le=2_000_000)
+    """Single-property entry (founder layout): address plus a few owner-known numbers.
+
+    Everything else (values, rent, comps, days on market, facts, property tax) is
+    estimated. Every money field is optional; blank means estimate or default."""
+    address: str = Field(min_length=5, max_length=300)       # full address, e.g. "123 Main St, Harper Woods, MI 48225"
+    city: Optional[str] = Field(None, max_length=120)          # optional; parsed from address when blank
+    state: Optional[str] = Field(None, max_length=2)
+    rehab_estimate: Optional[float] = Field(None, ge=0, le=500_000)
+    loan_balance: Optional[float] = Field(None, ge=0, le=2_000_000)
     loan_rate: Optional[float] = Field(None, ge=0, le=25)
     loan_pi: Optional[float] = Field(None, ge=0, le=20_000)
-    investor_payback: Optional[float] = Field(None, ge=0, le=5_000_000)
+    insurance_monthly: Optional[float] = Field(None, ge=0, le=2_000)
+    utilities_monthly: Optional[float] = Field(None, ge=0, le=2_000)
+    maintenance_monthly: Optional[float] = Field(None, ge=0, le=5_000)
+    security_monthly: Optional[float] = Field(None, ge=0, le=5_000)
+    other_monthly: Optional[float] = Field(None, ge=0, le=10_000)
+    annual_tax: Optional[float] = Field(None, ge=0, le=100_000)
     cost_basis: Optional[float] = Field(None, ge=0, le=5_000_000)
+    investor_exposure: Optional[float] = Field(None, ge=0, le=5_000_000)
+    other_owed_at_sale: Optional[float] = Field(None, ge=0, le=5_000_000)
+    arv: Optional[float] = Field(None, gt=0, le=10_000_000)
     notes: Optional[str] = Field(None, max_length=4000)
+
+
+def _single_fields(req: SingleRunRequest) -> dict:
+    line, city, state = split_address(req.address)
+    payback = (req.investor_exposure or 0) + (req.other_owed_at_sale or 0)
+    exposure_given = req.investor_exposure is not None or req.other_owed_at_sale is not None
+    return {"address_line": line, "city": req.city or city, "state": (req.state or state).upper(),
+            "full_address": req.address.strip(), "status": "Vacant",
+            "arv": req.arv, "rehab_quote": req.rehab_estimate,
+            "annual_tax": req.annual_tax,
+            "annual_insurance": req.insurance_monthly * 12 if req.insurance_monthly is not None else None,
+            "utilities_monthly": req.utilities_monthly, "maintenance_monthly": req.maintenance_monthly,
+            "security_monthly": req.security_monthly, "other_holding_monthly": req.other_monthly,
+            "loan_payoff": req.loan_balance, "loan_rate": req.loan_rate, "loan_pi": req.loan_pi,
+            "investor_payback": payback if exposure_given else None,
+            "investor_exposure": req.investor_exposure, "other_owed_at_sale": req.other_owed_at_sale,
+            "cost_basis": req.cost_basis, "notes": req.notes,
+            "lc_forfeiture_history": bool(owned_import.FORFEITURE_RE.search(req.notes or ""))}
 
 
 @router.post("/api/owned/single")
 async def create_single(req: SingleRunRequest, user: User = Depends(require_owned_access),
                         db: Session = Depends(get_db)):
-    if (req.loan_payoff or 0) > 0 and (not req.loan_rate or not req.loan_pi):
-        raise HTTPException(422, "A loan payoff above $0 requires the interest rate and monthly P&I")
-    fields = {"address_line": req.address, "city": req.city, "state": req.state.upper(), "portfolio": req.portfolio,
-              "status": "Vacant", "arv": req.arv, "rehab_quote": req.rehab_quote or None,
-              "annual_tax": req.annual_tax, "annual_insurance": req.annual_insurance,
-              "loan_payoff": req.loan_payoff, "loan_rate": req.loan_rate, "loan_pi": req.loan_pi,
-              "investor_payback": req.investor_payback, "cost_basis": req.cost_basis,
-              "beds": req.beds, "baths": req.baths, "sqft": req.sqft, "year_built": req.year_built,
-              "notes": req.notes, "lc_forfeiture_history": bool(owned_import.FORFEITURE_RE.search(req.notes or ""))}
+    fields = _single_fields(req)
     imported = owned_import.ImportedRow(1, fields)
     imported.flags = owned_import._row_flags(fields, date.today())
-    batch = _create_batch(db, user, "single", req.address, [imported])
+    batch = _create_batch(db, user, "single", req.address.strip(), [imported])
     return _batch_json(db, batch, user)
 
 
@@ -767,6 +838,7 @@ def _run_stream(batch_id: int, row_id: int):
                 row.estimates = _dump(est)
                 yield _fail(db, row, problem, True)
                 return
+            _add_tax_estimate(db, row, est)
             row.estimates = _dump(est)
             db.commit()
         # 2. Compute (pure Python).
@@ -1024,8 +1096,6 @@ async def confirm_statement(statement_id: int, req: ConfirmRequest, user: User =
     _get_batch(db, st.batch_id, user)
     if st.row_id is None:
         raise HTTPException(409, "Assign this statement to a property first")
-    if req.payoff > 0 and (req.rate is None or req.pi is None):
-        raise HTTPException(422, "A payoff above $0 requires the interest rate and monthly P&I")
     if st.statement_date and (datetime.utcnow() - st.statement_date).days > STALE_STATEMENT_DAYS and not req.confirm_stale:
         raise HTTPException(409, "This statement is more than 60 days old. Use 'Confirm anyway' to accept it.")
     st.confirmed = True

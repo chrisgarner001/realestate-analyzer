@@ -99,6 +99,8 @@ class Assumptions:
     # Decision
     owner_goal: Optional[str] = None                # maximize_cash_now | maximize_total_return | monthly_income | minimize_effort
     close_call_pct: float = 5.0
+    # Loan balance entered without rate/P&I: assume interest-only at this rate
+    default_loan_rate_pct: float = 8.0
 
 
 @dataclass
@@ -123,6 +125,11 @@ class PropertyInputs:
     rehab_budget: Optional[float] = None
     annual_tax: Optional[float] = None
     annual_insurance: Optional[float] = None
+    # Monthly holding costs while vacant (blank = batch defaults; security/other = $0)
+    utilities_monthly: Optional[float] = None
+    maintenance_monthly: Optional[float] = None
+    security_monthly: Optional[float] = None
+    other_holding_monthly: Optional[float] = None
     loan_payoff: float = 0.0
     loan_rate_pct: float = 0.0
     loan_pi: float = 0.0
@@ -237,6 +244,7 @@ class Resolved:
     contingency_pct: float
     annual_tax: float
     annual_insurance: float
+    holding_other_monthly: float                    # utilities + maintenance + security + other
     vacate_months: int
     cash_for_keys: float
     sources: dict
@@ -244,6 +252,14 @@ class Resolved:
 
 def resolve(p: PropertyInputs, a: Assumptions) -> Resolved:
     src = dict(p.sources)
+    if p.loan_payoff > 0 and (not p.loan_rate_pct or not p.loan_pi):
+        rate = p.loan_rate_pct or a.default_loan_rate_pct
+        pi = p.loan_pi or round(p.loan_payoff * rate / 1200.0, 2)     # interest-only
+        if not p.loan_rate_pct:
+            src["loan_rate_pct"] = "DEFAULT"
+        if not p.loan_pi:
+            src["loan_pi"] = "DEFAULT"
+        p = replace(p, loan_rate_pct=rate, loan_pi=pi)
 
     def tag(name, value, default_value):
         if value is None:
@@ -290,6 +306,9 @@ def resolve(p: PropertyInputs, a: Assumptions) -> Resolved:
         src.setdefault("months_of_supply", "USER")
     annual_tax = tag("annual_tax", p.annual_tax, 0.0)
     annual_ins = tag("annual_insurance", p.annual_insurance, a.insurance_default_annual)
+    holding_other = (tag("utilities_monthly", p.utilities_monthly, a.utilities_vacant_monthly)
+                     + tag("maintenance_monthly", p.maintenance_monthly, a.min_maintenance_monthly)
+                     + (p.security_monthly or 0.0) + (p.other_holding_monthly or 0.0))
     for name in ("beds", "baths", "sqft", "year_built", "cost_basis"):
         if getattr(p, name) is None:
             src.setdefault(name, "DEFAULT")
@@ -317,7 +336,7 @@ def resolve(p: PropertyInputs, a: Assumptions) -> Resolved:
                     appreciation_pct=appreciation, months_of_supply=p.months_of_supply,
                     rehab_budget=rehab_budget, rehab_total=rehab_total, rehab_months=rehab_months,
                     contingency_pct=contingency, annual_tax=annual_tax, annual_insurance=annual_ins,
-                    vacate_months=vacate_months, cash_for_keys=cfk, sources=src)
+                    holding_other_monthly=holding_other, vacate_months=vacate_months, cash_for_keys=cfk, sources=src)
 
 
 # ── shared cash-flow pieces ─────────────────────────────────────────────────
@@ -332,7 +351,7 @@ def _vacant_carry(r: Resolved, month: int, loan_payment: float) -> float:
     a = r.a
     return (_grown(r.annual_tax, a.tax_growth_pct, month)
             + _grown(r.annual_insurance, a.insurance_growth_pct, month)
-            + loan_payment + a.utilities_vacant_monthly + a.min_maintenance_monthly)
+            + loan_payment + r.holding_other_monthly)
 
 
 def _occupied_offset(r: Resolved, month: int) -> float:
@@ -854,6 +873,9 @@ def preflight_flags(r: Resolved, scen: dict) -> list[dict]:
     if Loan(r.p.loan_payoff, r.p.loan_rate_pct, r.p.loan_pi).negative_amortization:
         flags.append({"type": "data", "severity": "warning",
                       "message": "Loan P&I is below the monthly interest (negative amortization)"})
+    if r.sources.get("loan_rate_pct") == "DEFAULT" or r.sources.get("loan_pi") == "DEFAULT":
+        flags.append({"type": "data", "severity": "info",
+                      "message": f"Loan rate/payment not entered: assumed {r.p.loan_rate_pct:g}% interest-only (${r.p.loan_pi:,.0f}/mo)"})
     if r.p.stale_loan_statement:
         flags.append({"type": "data", "severity": "warning",
                       "message": "Loan payoff comes from a statement more than 60 days old"})
@@ -922,6 +944,19 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
         val = getattr(r, k, None) if hasattr(r, k) else getattr(p, k, None)
         assumptions_list.append({"name": k, "value": val, "source": r.sources.get(k, "USER"),
                                  "source_detail": p.sources.get(k + "_detail", "")})
+    # Display-only inputs (not counted by the confidence rule).
+    rp = r.p
+    for k, val in (("loan_rate_pct", rp.loan_rate_pct if rp.loan_payoff else None),
+                   ("loan_pi", rp.loan_pi if rp.loan_payoff else None),
+                   ("utilities_monthly", rp.utilities_monthly if rp.utilities_monthly is not None else a.utilities_vacant_monthly),
+                   ("maintenance_monthly", rp.maintenance_monthly if rp.maintenance_monthly is not None else a.min_maintenance_monthly),
+                   ("security_monthly", rp.security_monthly or 0.0),
+                   ("other_holding_monthly", rp.other_holding_monthly or 0.0)):
+        if val is None:
+            continue
+        default = r.sources.get(k) == "DEFAULT" or (k in ("security_monthly", "other_holding_monthly") and getattr(rp, k) is None)
+        assumptions_list.append({"name": k, "value": val, "source": "DEFAULT" if default else "USER",
+                                 "source_detail": ""})
     return {
         "property": {"address": p.address, "city": p.city, "state": p.state,
                      "occupancy": p.occupancy, "confidence": confidence(r)},
