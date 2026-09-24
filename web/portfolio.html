@@ -119,6 +119,7 @@
           <legend class="text-xs font-semibold mb-2 sm:col-span-3" style="color:var(--gold-light)">Rehab &amp; loan</legend>
           <div><label class="f">Rehab estimate</label><input class="w-full" type="number" min="0" x-model="single.rehab_estimate" placeholder="$"><p class="help">Blank → estimated from condition notes</p></div>
           <div><label class="f">Loan balance</label><input class="w-full" type="number" min="0" x-model="single.loan_balance" placeholder="$"><p class="help">Payoff amount today. Blank = no loan</p></div>
+          <div><label class="f" for="s-date-vacant">Date vacant</label><input id="s-date-vacant" class="w-full" type="date" x-model="single.date_vacant"><p class="help">Carrying cost since this date is added to your cost basis</p></div>
         </fieldset>
         <fieldset class="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <legend class="text-xs font-semibold mb-2 col-span-2 sm:col-span-5" style="color:var(--gold-light)">Monthly holding costs</legend>
@@ -131,7 +132,7 @@
         </fieldset>
         <fieldset class="grid sm:grid-cols-3 gap-3">
           <legend class="text-xs font-semibold mb-2 sm:col-span-3" style="color:var(--gold-light)">Basis &amp; exposure</legend>
-          <div><label class="f">Current cost basis</label><input class="w-full" type="number" min="0" x-model="single.cost_basis" placeholder="$"><p class="help">Purchase + improvements + carrying costs to date</p></div>
+          <div><label class="f">Current cost basis</label><input class="w-full" type="number" min="0" x-model="single.cost_basis" placeholder="$"><p class="help">Purchase + improvements (carrying cost since the vacant date is added)</p></div>
           <div><label class="f">Investor exposure</label><input class="w-full" type="number" min="0" x-model="single.investor_exposure" placeholder="$"><p class="help">Owed to investors at sale or LC payoff</p></div>
           <div><label class="f">Other owed at sale</label><input class="w-full" type="number" min="0" x-model="single.other_owed_at_sale" placeholder="$"><p class="help">Liens, back taxes, fees paid from proceeds</p></div>
         </fieldset>
@@ -451,97 +452,353 @@
           <span class="muted">Confidence:</span> <span :class="confClass(report)" class="font-semibold" x-text="report.analysis.property.confidence"></span>
           <template x-for="f in report.flags" :key="f"><span class="chip ml-1" :class="flagChip(f)" x-text="f"></span></template>
         </p>
-        <div class="rounded-lg px-4 py-3 mt-2" style="background:var(--navy-mid)">
+      </section>
+
+      <!-- Your four options -->
+      <section>
+        <h2 class="font-semibold mb-3 px-1">Your four options</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <template x-for="k in STRATS" :key="k">
+            <div class="card rounded-xl p-4 space-y-2" :style="k===recOf(report).strategy && 'border:2px solid var(--gold-light)'">
+              <div class="flex items-start justify-between gap-2">
+                <span class="font-semibold text-sm" x-text="label(k)"></span>
+                <span class="exit-badge" :class="k===recOf(report).strategy?'chip-gold':''"
+                  :style="!scen(report,k).eligible ? 'color:var(--red)' : (k===recOf(report).strategy?'color:var(--gold-light)':'')"
+                  x-text="k===recOf(report).strategy ? 'Recommended' : (!scen(report,k).eligible ? 'Ruled out' : (k===recOf(report).runner_up ? 'Runner-up' : 'Option'))"></span>
+              </div>
+              <p class="text-2xl font-semibold" x-text="money(scen(report,k).net_profit)"></p>
+              <p class="text-xs muted -mt-2">Net cash to you</p>
+              <div class="text-sm space-y-1 pt-2 border-t" style="border-color:var(--border)">
+                <div class="flex justify-between gap-2"><span class="muted">Value today (risk-adjusted)</span><span class="text-right" x-text="money(scen(report,k).risk_adjusted_score)"></span></div>
+                <div class="flex justify-between gap-2"><span class="muted">Time to cash</span><span class="text-right" x-text="scen(report,k).timeline_months + ' months' + ((k==='rehab_rent'||k==='rehab_land_contract') && scen(report,k).liquidity_label ? ' · ' + scen(report,k).liquidity_label : '')"></span></div>
+                <div class="flex justify-between gap-2"><span class="muted">Cash you put in</span><span class="text-right" x-text="money(scen(report,k).peak_capital)"></span></div>
+                <div class="flex justify-between gap-2"><span class="muted">Risk</span><span class="text-right" :style="riskColor(scen(report,k).risk_score)" x-text="riskLabel(scen(report,k).risk_score) + ' (' + (scen(report,k).risk_score??'—') + '/10)'"></span></div>
+                <div class="flex justify-between gap-2"><span class="muted">Effort</span><span class="text-right" x-text="scen(report,k).effort||'—'"></span></div>
+              </div>
+              <p x-show="scen(report,k).disqualifier" class="text-xs" style="color:var(--red)" x-text="'Ruled out: ' + scen(report,k).disqualifier"></p>
+              <p x-show="scen(report,k).shortfall>0" class="text-xs" style="color:var(--red)" x-text="'Short ' + money(scen(report,k).shortfall) + ' at closing'"></p>
+            </div>
+          </template>
+        </div>
+        <p x-show="recOf(report).close_call" class="text-xs mt-2" style="color:var(--gold-light)">Close call: within 5% — the faster, lower-capital exit is preferred.</p>
+      </section>
+
+      <!-- Why -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Why</h2>
+        <div class="rounded-lg px-4 py-3" style="background:var(--navy-mid)">
           <p class="font-semibold" x-html="banner(report)"></p>
         </div>
-      </section>
-
-      <!-- comparison table -->
-      <section class="card rounded-xl overflow-x-auto">
-        <table class="tbl">
-          <caption class="sr-only">Exit comparison</caption>
-          <thead><tr>
-            <th scope="col" class="sticky-col">Metric</th>
-            <template x-for="k in STRATS" :key="k">
-              <th scope="col" class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']">
-                <span x-text="label(k)"></span>
-                <p x-show="k==='rehab_land_contract' && report.analysis.assumptions.find(a=>a.name==='lc_servicer'&&a.value)" class="help" x-text="'Serviced by ' + ((report.analysis.assumptions.find(a=>a.name==='lc_servicer')||{}).value||'')"></p>
-              </th>
-            </template>
-          </tr></thead>
-          <tbody>
-            <template x-for="m in METRICS" :key="m.key">
-              <tr>
-                <th scope="row" class="sticky-col" :style="m.bold&&'color:var(--text)'" x-text="m.label"></th>
-                <template x-for="k in STRATS" :key="k">
-                  <td class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']" :style="m.bold&&'font-weight:700'" x-text="fmtMetric(m, scen(report,k))"></td>
-                </template>
-              </tr>
-            </template>
-            <tr>
-              <th scope="row" class="sticky-col">Ruled out</th>
-              <template x-for="k in STRATS" :key="k"><td class="text-xs" style="color:#fca5a5" x-text="scen(report,k).disqualifier||''"></td></template>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section class="grid lg:grid-cols-2 gap-5">
-        <div class="card rounded-xl p-5">
-          <h2 class="font-semibold mb-2">Why this wins</h2>
-          <p x-show="report.rationale_stale" class="text-xs mb-2" style="color:var(--gold-light)">Written under previous assumptions. The numbers above are current.</p>
-          <div class="prose-report text-sm" x-html="md(report.rationale || '')"></div>
-        </div>
-        <div class="card rounded-xl p-5">
-          <h2 class="font-semibold mb-2">What would change the answer</h2>
-          <p x-show="!recOf(report).break_even_triggers.length" class="text-sm muted">No single input within ±50% flips the recommendation.</p>
-          <ul class="text-sm space-y-1 list-disc ml-5">
-            <template x-for="t in recOf(report).break_even_triggers" :key="t.variable + t.direction">
-              <li x-text="'If ' + t.label + ' is ' + t.direction + ' ' + money(t.threshold) + ', ' + label(t.new_winner) + ' wins.'"></li>
-            </template>
-          </ul>
-        </div>
-      </section>
-
-      <section class="card rounded-xl overflow-x-auto">
-        <div class="px-4 pt-4"><h2 class="font-semibold">Stress tests (NPV)</h2><p class="help">Worst result per exit is marked.</p></div>
-        <table class="tbl mt-2">
-          <thead><tr><th scope="col" class="sticky-col">Scenario</th><template x-for="k in STRATS" :key="k"><th scope="col" class="num" x-text="label(k)"></th></template></tr></thead>
-          <tbody>
-            <template x-for="s in STRESS" :key="s.key">
-              <tr>
-                <th scope="row" class="sticky-col" x-text="s.label"></th>
-                <template x-for="k in STRATS" :key="k">
-                  <td class="num" :style="isWorst(report,k,s.key)&&'color:#fca5a5;font-weight:700'" x-text="money(scen(report,k).stress_tests[s.key]) + (isWorst(report,k,s.key)?' ▼':'')"></td>
-                </template>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </section>
-
-      <section class="card rounded-xl p-5" x-show="report.analysis.flags.length">
-        <h2 class="font-semibold mb-2">Flags</h2>
-        <ul class="text-sm space-y-1">
-          <template x-for="f in report.analysis.flags" :key="f.message">
-            <li><span class="chip" :class="f.severity==='critical'?'chip-red':(f.severity==='warning'?'chip-gold':'')" x-text="f.severity"></span> <span x-text="f.message"></span></li>
+        <p x-show="!report.writeup && report.rationale_stale" class="text-xs" style="color:var(--gold-light)">Written under previous assumptions. The numbers above are current.</p>
+        <div class="prose-report text-sm" x-html="report.writeup ? md(writeupSection(report.writeup,'Recommendation')) : md(report.rationale || '')"></div>
+        <div>
+          <h3 class="font-semibold text-sm mb-1">What would change the answer</h3>
+          <template x-if="report.writeup && writeupSection(report.writeup,'What would change the answer')">
+            <div class="prose-report text-sm" x-html="md(writeupSection(report.writeup,'What would change the answer'))"></div>
           </template>
-        </ul>
+          <template x-if="!report.writeup || !writeupSection(report.writeup,'What would change the answer')">
+            <div>
+              <p x-show="!recOf(report).break_even_triggers.length" class="text-sm muted">No single input within ±50% flips the recommendation.</p>
+              <ul class="text-sm space-y-1 list-disc ml-5">
+                <template x-for="t in recOf(report).break_even_triggers" :key="t.variable + t.direction">
+                  <li x-text="'If ' + t.label + ' is ' + t.direction + ' ' + money(t.threshold) + ', ' + label(t.new_winner) + ' wins.'"></li>
+                </template>
+              </ul>
+            </div>
+          </template>
+        </div>
       </section>
 
-      <section class="card rounded-xl overflow-x-auto">
-        <div class="px-4 pt-4"><h2 class="font-semibold">Property inputs</h2><p class="help">USER = your spreadsheet or edits · DATA = market research · DEFAULT = standard assumption, lowers confidence</p></div>
-        <table class="tbl mt-2">
-          <thead><tr><th scope="col">Input</th><th scope="col" class="num">Value</th><th scope="col">Source</th><th scope="col">Detail</th></tr></thead>
-          <tbody>
-            <template x-for="a in propertyInputs(report)" :key="a.name">
-              <tr><td x-text="a.name.replaceAll('_',' ')"></td><td class="num" x-text="a.value==null?'—':(typeof a.value==='number'?a.value.toLocaleString():a.value)"></td>
-                <td><span class="chip" :class="a.source==='USER'?'chip-green':(a.source==='DATA'?'chip-gold':'')" x-text="a.source"></span></td>
-                <td class="text-xs muted" x-text="a.source_detail||''"></td></tr>
-            </template>
-          </tbody>
-        </table>
+      <!-- Red flags & what to do -->
+      <section class="card rounded-xl p-5 space-y-3" x-show="report.analysis.flags.length">
+        <h2 class="font-semibold">Red flags &amp; what to do</h2>
+        <div class="space-y-2">
+          <template x-for="f in sortedFlags(report)" :key="f.message">
+            <div class="pl-3 py-1" :style="'border-left:3px solid ' + (f.severity==='critical'?'#ef4444':(f.severity==='warning'?'var(--gold)':'var(--border)'))">
+              <span class="chip" :class="f.severity==='critical'?'chip-red':(f.severity==='warning'?'chip-gold':'')" x-text="f.severity"></span>
+              <p class="text-sm font-semibold mt-1" x-text="f.message"></p>
+              <p x-show="f.suggestion" class="text-sm muted" x-text="'What to do: ' + f.suggestion"></p>
+            </div>
+          </template>
+        </div>
+        <template x-if="report.writeup && writeupSection(report.writeup,'Next Steps')">
+          <div>
+            <h3 class="font-semibold text-sm mb-1">Next steps</h3>
+            <div class="prose-report text-sm" x-html="md(writeupSection(report.writeup,'Next Steps'))"></div>
+          </div>
+        </template>
       </section>
+
+      <!-- Financial examples -->
+      <section>
+        <h2 class="font-semibold mb-3 px-1">Financial examples</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <template x-for="k in STRATS" :key="k">
+            <div class="card rounded-xl p-4" :style="k===recOf(report).strategy && 'border:2px solid var(--gold-light)'">
+              <p class="font-semibold text-sm mb-2" x-text="label(k)"></p>
+              <table class="tbl">
+                <tbody>
+                  <template x-for="row in (scen(report,k).details && scen(report,k).details.waterfall)||[]" :key="row.label">
+                    <tr :style="row.total && 'border-top:1px solid var(--border);font-weight:700'">
+                      <td x-text="row.label"></td>
+                      <td class="num" :style="row.amount<0 && 'color:var(--muted)'" x-text="money(row.amount)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+
+        <details class="card rounded-xl p-4 mt-4">
+          <summary class="font-semibold cursor-pointer">Detailed metrics</summary>
+          <div class="overflow-x-auto mt-3">
+            <table class="tbl">
+              <caption class="sr-only">Exit comparison</caption>
+              <thead><tr>
+                <th scope="col" class="sticky-col">Metric</th>
+                <template x-for="k in STRATS" :key="k">
+                  <th scope="col" class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']">
+                    <span x-text="label(k)"></span>
+                    <p x-show="k==='rehab_land_contract' && report.analysis.assumptions.find(a=>a.name==='lc_servicer'&&a.value)" class="help" x-text="'Serviced by ' + ((report.analysis.assumptions.find(a=>a.name==='lc_servicer')||{}).value||'')"></p>
+                  </th>
+                </template>
+              </tr></thead>
+              <tbody>
+                <template x-for="m in METRICS" :key="m.key">
+                  <tr>
+                    <th scope="row" class="sticky-col" :style="m.bold&&'color:var(--text)'" x-text="m.label"></th>
+                    <template x-for="k in STRATS" :key="k">
+                      <td class="num" :class="[k===recOf(report).strategy&&'rec-col', !scen(report,k).eligible&&'dq']" :style="m.bold&&'font-weight:700'" x-text="fmtMetric(m, scen(report,k))"></td>
+                    </template>
+                  </tr>
+                </template>
+                <tr>
+                  <th scope="row" class="sticky-col">Ruled out</th>
+                  <template x-for="k in STRATS" :key="k"><td class="text-xs" style="color:#fca5a5" x-text="scen(report,k).disqualifier||''"></td></template>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="card rounded-xl p-4 mt-4">
+          <summary class="font-semibold cursor-pointer">Stress tests (NPV)</summary>
+          <p class="help mt-1">Worst result per exit is marked.</p>
+          <div class="overflow-x-auto mt-3">
+            <table class="tbl">
+              <thead><tr><th scope="col" class="sticky-col">Scenario</th><template x-for="k in STRATS" :key="k"><th scope="col" class="num" x-text="label(k)"></th></template></tr></thead>
+              <tbody>
+                <template x-for="s in STRESS" :key="s.key">
+                  <tr>
+                    <th scope="row" class="sticky-col" x-text="s.label"></th>
+                    <template x-for="k in STRATS" :key="k">
+                      <td class="num" :style="isWorst(report,k,s.key)&&'color:#fca5a5;font-weight:700'" x-text="money(scen(report,k).stress_tests[s.key]) + (isWorst(report,k,s.key)?' ▼':'')"></td>
+                    </template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- Land Contract Sale -->
+      <section class="card rounded-xl p-5 space-y-4">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h2 class="font-semibold">Land Contract Sale</h2>
+          <span x-show="!lcD(report).servicer" class="text-xs" style="color:var(--red)">No servicer set: compliance review required</span>
+          <span x-show="lcD(report).servicer" class="text-xs muted" x-text="'Serviced by ' + lcD(report).servicer"></span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div><label class="f">Sale price ($)</label><input class="w-full" type="number" min="0" x-model.number="lcForm.sale_price"></div>
+          <div><label class="f">Down payment (%)</label><input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.down_pct"></div>
+          <div><label class="f">Interest rate (%)</label><input class="w-full" type="number" min="0" step="0.01" x-model.number="lcForm.rate_pct"></div>
+          <div><label class="f">Term (years)</label><input class="w-full" type="number" min="1" x-model.number="lcForm.term_years"></div>
+          <div><label class="f">Default risk (%)</label><input class="w-full" type="number" min="0" max="100" step="0.1" x-model.number="lcForm.default_prob_pct"></div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <button class="btn btn-primary" :disabled="lcBusy" @click="recalcLc(report)" x-text="lcBusy ? 'Recalculating…' : 'Recalculate · free'"></button>
+          <button class="btn" :disabled="lcBusy" @click="resetLc(report)">Reset to batch terms</button>
+          <span x-show="lcError" class="text-sm" style="color:var(--red)" x-text="lcError"></span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Sale price</p><p class="font-semibold" x-text="money(lcD(report).lc_price)"></p></div>
+          <div class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Down payment</p><p class="font-semibold" x-text="money(lcD(report).down_payment)"></p><p class="help" x-text="(lcD(report).down_pct!=null?lcD(report).down_pct:'—') + '% at closing'"></p></div>
+          <div class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Amount financed</p><p class="font-semibold" x-text="money(lcD(report).principal)"></p><p class="help" x-text="(lcD(report).lc_price ? Math.round(100*(lcD(report).principal||0)/lcD(report).lc_price) : '—') + '% financed'"></p></div>
+          <div class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Buyer's monthly payment</p><p class="font-semibold" x-text="money1(lcD(report).monthly_payment)"></p></div>
+        </div>
+
+        <div class="text-sm space-y-1">
+          <div class="flex justify-between"><span class="muted">Principal &amp; interest</span><span x-text="money1(lcD(report).monthly_payment)"></span></div>
+          <div class="flex justify-between"><span class="muted">Est. property tax</span><span x-text="money1(lcD(report).buyer_monthly_tax)"></span></div>
+          <div class="flex justify-between"><span class="muted">Est. insurance</span><span x-text="money1(lcD(report).buyer_monthly_insurance)"></span></div>
+          <div class="flex justify-between font-semibold pt-1 border-t" style="color:var(--green-light);border-color:var(--border)"><span>Buyer's total monthly</span><span x-text="money1((lcD(report).monthly_payment||0)+(lcD(report).buyer_monthly_tax||0)+(lcD(report).buyer_monthly_insurance||0))"></span></div>
+        </div>
+
+        <div class="text-sm space-y-1 pt-2 border-t" style="border-color:var(--border)">
+          <div class="flex justify-between"><span class="muted">Cash to you at closing</span><span :style="lcD(report).closing_cash<0 && 'color:var(--red)'" x-text="money(lcD(report).closing_cash)"></span></div>
+          <p class="help">after closing costs and paying off your loan</p>
+          <div class="flex justify-between"><span class="muted" x-text="'Interest earned over ' + ((lcD(report).balloon_month||0)-(lcD(report).closing_month||0)) + ' months'"></span><span x-text="money(lcD(report).total_interest_earned)"></span></div>
+          <div class="flex justify-between"><span class="muted" x-text="'Balloon at month ' + (lcD(report).balloon_month??'—')"></span><span x-text="money(lcD(report).balloon_balance)"></span></div>
+          <div class="flex justify-between" x-show="lcD(report).investor_payback>0"><span class="muted">Investor payback (paid at balloon or note sale)</span><span x-text="money(lcD(report).investor_payback)"></span></div>
+          <div class="flex justify-between"><span class="muted">Expected net cash (incl. default risk)</span><span x-text="money(scen(report,'rehab_land_contract').net_profit)"></span></div>
+          <div class="flex justify-between"><span class="muted">vs. sell as-is</span><span :style="(scen(report,'rehab_land_contract').net_profit-scen(report,'sell_as_is').net_profit)>=0 ? 'color:var(--green-light)' : 'color:var(--red)'" x-text="money(scen(report,'rehab_land_contract').net_profit-scen(report,'sell_as_is').net_profit)"></span></div>
+        </div>
+
+        <div class="rounded-lg p-3 text-sm" style="background:var(--navy-mid)">
+          <p x-text="'If the buyer defaults (' + (lcD(report).default_prob_pct??'—') + '% chance): payments stop around month 14, you carry the property, then resell as-is around month 20.'"></p>
+          <div class="grid grid-cols-2 gap-3 mt-2">
+            <div><p class="text-xs muted">Value if the buyer pays</p><p x-text="money(lcD(report).performing_npv)"></p></div>
+            <div><p class="text-xs muted">Value if the buyer defaults</p><p x-text="money(lcD(report).default_npv)"></p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Comparable sales -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Comparable sales</h2>
+        <p class="text-xs muted" x-show="report.estimates && report.estimates.comp_search" x-text="report.estimates && report.estimates.comp_search && (String(report.estimates.comp_search.sale_radius).replace(/\s*mi$/, '') + ' mi radius · '+ report.estimates.comp_search.sale_window_days + ' day window · ' + report.estimates.comp_search.confidence + ' confidence' + (report.estimates.comp_search.notes ? ' · ' + report.estimates.comp_search.notes : ''))"></p>
+        <p x-show="!(report.estimates && report.estimates.sale_comps && report.estimates.sale_comps.length)" class="text-sm muted">No sale comps were returned for this property.</p>
+        <div x-show="report.estimates && report.estimates.sale_comps && report.estimates.sale_comps.length" class="overflow-x-auto">
+          <table class="tbl">
+            <thead><tr><th scope="col">Address</th><th scope="col" class="num">Sale price</th><th scope="col">Beds/Ba</th><th scope="col" class="num">Sq ft</th><th scope="col" class="num">$/sq ft</th><th scope="col">Distance</th><th scope="col">Sale date</th><th scope="col">Condition · used for</th><th scope="col">Source</th><th scope="col">Notes</th></tr></thead>
+            <tbody>
+              <template x-for="c in (report.estimates && report.estimates.sale_comps)||[]" :key="c.address">
+                <tr>
+                  <td x-text="c.address"></td>
+                  <td class="num" x-text="money(c.sale_price)"></td>
+                  <td x-text="(c.beds??'—') + '/' + (c.baths??'—')"></td>
+                  <td class="num" x-text="c.sqft ?? '—'"></td>
+                  <td class="num" x-text="(c.sale_price && c.sqft) ? money1(c.sale_price/c.sqft) : '—'"></td>
+                  <td x-text="c.distance||'—'"></td>
+                  <td x-text="c.sale_date||'—'"></td>
+                  <td x-text="(c.condition||'—') + ' · ' + (c.used_for||'—')"></td>
+                  <td x-text="c.source||'—'"></td>
+                  <td class="text-xs muted" x-text="[c.selection_rationale, c.adjustments].filter(Boolean).join(' · ')"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Rental comparables -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Rental comparables</h2>
+        <p class="text-sm muted" x-text="'Market rent used: ' + money1(scen(report,'rehab_rent').details && scen(report,'rehab_rent').details.market_rent) + '/mo'"></p>
+        <p x-show="!(report.estimates && report.estimates.rental_comps && report.estimates.rental_comps.length)" class="text-sm muted">No rental comps were returned for this property.</p>
+        <div x-show="report.estimates && report.estimates.rental_comps && report.estimates.rental_comps.length" class="overflow-x-auto">
+          <table class="tbl">
+            <thead><tr><th scope="col">Address / neighborhood</th><th scope="col" class="num">Rent</th><th scope="col">Beds/Ba</th><th scope="col" class="num">Sq ft</th><th scope="col">Distance</th><th scope="col">Listed/leased</th><th scope="col">Condition / features</th><th scope="col">Source</th></tr></thead>
+            <tbody>
+              <template x-for="c in (report.estimates && report.estimates.rental_comps)||[]" :key="c.address">
+                <tr>
+                  <td><span x-text="c.address"></span><p class="help" x-text="c.neighborhood||''"></p></td>
+                  <td class="num" x-text="money1(c.monthly_rent)"></td>
+                  <td x-text="(c.beds??'—') + '/' + (c.baths??'—')"></td>
+                  <td class="num" x-text="c.sqft ?? '—'"></td>
+                  <td x-text="c.distance||'—'"></td>
+                  <td x-text="(c.listed_or_leased_date||'—') + ' · ' + (c.status||'—')"></td>
+                  <td x-text="c.condition_features||'—'"></td>
+                  <td x-text="c.source||'—'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Market conditions -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Market conditions</h2>
+        <template x-if="report.estimates && report.estimates.market">
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div x-show="report.estimates.market.classification" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Classification</p><p class="font-semibold" x-text="report.estimates.market.classification"></p></div>
+              <div x-show="report.estimates.market.median_sale_price!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Median sale price</p><p class="font-semibold" x-text="money(report.estimates.market.median_sale_price)"></p></div>
+              <div x-show="report.estimates.market.price_trend_yoy_pct!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Price trend YoY</p><p class="font-semibold" x-text="report.estimates.market.price_trend_yoy_pct + '%'"></p></div>
+              <div x-show="report.estimates.market.days_on_market!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Days on market</p><p class="font-semibold" x-text="report.estimates.market.days_on_market"></p></div>
+              <div x-show="report.estimates.market.months_of_inventory!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Months of inventory</p><p class="font-semibold" x-text="report.estimates.market.months_of_inventory"></p></div>
+              <div x-show="report.estimates.market.rent_trend_yoy_pct!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Rent trend YoY</p><p class="font-semibold" x-text="report.estimates.market.rent_trend_yoy_pct + '%'"></p></div>
+              <div x-show="report.estimates.market.vacancy_rate_pct!=null" class="rounded-lg p-3" style="background:var(--navy-mid)"><p class="text-xs muted">Vacancy rate</p><p class="font-semibold" x-text="report.estimates.market.vacancy_rate_pct + '%'"></p></div>
+            </div>
+            <ul x-show="report.estimates.market.drivers && report.estimates.market.drivers.length" class="text-sm list-disc ml-5 space-y-1">
+              <template x-for="d in report.estimates.market.drivers||[]" :key="d"><li x-text="d"></li></template>
+            </ul>
+            <p x-show="report.estimates.market.outlook_12mo" class="text-sm" x-text="report.estimates.market.outlook_12mo"></p>
+          </div>
+        </template>
+        <template x-if="report.writeup && writeupSection(report.writeup,'Market Conditions')">
+          <div class="prose-report text-sm" x-html="md(writeupSection(report.writeup,'Market Conditions'))"></div>
+        </template>
+      </section>
+
+      <!-- Neighborhood -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Neighborhood</h2>
+        <template x-if="report.writeup">
+          <div class="prose-report text-sm" x-html="md(writeupSection(report.writeup,'Neighborhood Quality'))"></div>
+        </template>
+        <template x-if="!report.writeup">
+          <div>
+            <template x-if="writeupBusy">
+              <div>
+                <p class="text-sm muted mb-2"><span class="spin">◌</span> Writing the full report (neighborhood, market, next steps)…</p>
+                <div class="prose-report text-sm" x-html="md(writeupText)"></div>
+              </div>
+            </template>
+            <button x-show="!writeupBusy" class="btn" @click="runWriteup(report)">Generate full report · included</button>
+            <p x-show="writeupError" class="text-sm mt-2" style="color:var(--red)" x-text="writeupError"></p>
+          </div>
+        </template>
+      </section>
+
+      <!-- Holding costs & vacancy -->
+      <section class="card rounded-xl p-5 space-y-3">
+        <h2 class="font-semibold">Holding costs &amp; vacancy</h2>
+        <p x-show="report.analysis.vacancy.months_vacant!=null" class="text-sm muted" x-text="'Vacant ' + report.analysis.vacancy.months_vacant + ' months (since ' + (report.inputs.vacant_since||'—') + ')'"></p>
+        <div class="overflow-x-auto">
+          <table class="tbl">
+            <tbody>
+              <template x-for="row in holdingRows(report)" :key="row.k">
+                <tr>
+                  <td x-text="row.label"></td>
+                  <td class="num" x-text="money1((report.analysis.vacancy.monthly_breakdown||{})[row.k])"></td>
+                </tr>
+              </template>
+              <tr style="border-top:1px solid var(--border);font-weight:700">
+                <td>Total monthly</td>
+                <td class="num" x-text="money1(report.analysis.vacancy.monthly_carry)"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="text-sm space-y-1">
+          <div class="flex justify-between"><span class="muted">Carrying cost since vacant</span><span x-text="money(report.analysis.vacancy.carry_since_vacant)"></span></div>
+          <div class="flex justify-between" x-show="report.analysis.vacancy.cost_basis_entered!=null"><span class="muted">Cost basis you entered</span><span x-text="money(report.analysis.vacancy.cost_basis_entered)"></span></div>
+          <div class="flex justify-between" x-show="report.analysis.vacancy.cost_basis_entered!=null"><span class="muted">Adjusted cost basis (incl. carrying since vacant)</span><span x-text="money(report.analysis.vacancy.cost_basis_adjusted)"></span></div>
+        </div>
+      </section>
+
+      <details class="card rounded-xl p-4">
+        <summary class="font-semibold cursor-pointer">Property inputs &amp; sources</summary>
+        <p class="help mt-1">USER = your spreadsheet or edits · DATA = market research · DEFAULT = standard assumption, lowers confidence</p>
+        <div class="overflow-x-auto mt-3">
+          <table class="tbl">
+            <thead><tr><th scope="col">Input</th><th scope="col" class="num">Value</th><th scope="col">Source</th><th scope="col">Detail</th></tr></thead>
+            <tbody>
+              <template x-for="a in propertyInputs(report)" :key="a.name">
+                <tr><td x-text="a.name.replaceAll('_',' ')"></td><td class="num" x-text="a.value==null?'—':(typeof a.value==='number'?a.value.toLocaleString():a.value)"></td>
+                  <td><span class="chip" :class="a.source==='USER'?'chip-green':(a.source==='DATA'?'chip-gold':'')" x-text="a.source"></span></td>
+                  <td class="text-xs muted" x-text="a.source_detail||''"></td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </details>
 
       <details class="card rounded-xl p-4">
         <summary class="font-semibold cursor-pointer">Batch assumptions used</summary>
@@ -551,16 +808,6 @@
           </template>
         </div>
       </details>
-
-      <section class="card rounded-xl p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="font-semibold">Full write-up</h2>
-          <button x-show="!report.writeup && !writeupBusy" class="btn" @click="runWriteup(report)">Generate full write-up · included</button>
-          <span x-show="writeupBusy" class="text-xs muted"><span class="spin">◌</span> Writing…</span>
-        </div>
-        <p x-show="writeupError" class="text-sm" style="color:var(--red)" x-text="writeupError"></p>
-        <div class="prose-report text-sm" x-html="md(report.writeup || writeupText)"></div>
-      </section>
 
       <p class="text-xs muted">This analysis is an investment model, not legal or tax advice. Confirm the tax impact with your CPA and land contract terms with a Michigan real estate attorney.</p>
     </div>
@@ -633,6 +880,7 @@ function portfolio() {
     stmtBusy: false, stmtProgress: '', stmtEdits: {},
     drawer: null, startDialog: false,
     writeupBusy: false, writeupText: '', writeupError: '',
+    lcForm: { sale_price: '', down_pct: '', rate_pct: '', term_years: '', default_prob_pct: '' }, lcBusy: false, lcError: '',
     STRATS: ['sell_as_is', 'rehab_sell', 'rehab_rent', 'rehab_land_contract'],
     METRICS: [
       { key: 'risk_adjusted_score', label: 'Risk-adjusted value', fmt: 'money', bold: true },
@@ -706,7 +954,7 @@ function portfolio() {
     async refreshMe() { try { this.me = { ...this.me, ...(await this.api('/api/me')) }; } catch (e) {} },
 
     // ── home ──
-    blankSingle() { return { address: '', rehab_estimate: '', loan_balance: '', insurance_monthly: '', utilities_monthly: '', maintenance_monthly: '', security_monthly: '', other_monthly: '', cost_basis: '', investor_exposure: '', other_owed_at_sale: '', notes: '', loan_rate: '', loan_pi: '', annual_tax: '', arv: '' }; },
+    blankSingle() { return { address: '', rehab_estimate: '', loan_balance: '', date_vacant: '', insurance_monthly: '', utilities_monthly: '', maintenance_monthly: '', security_monthly: '', other_monthly: '', cost_basis: '', investor_exposure: '', other_owed_at_sale: '', notes: '', loan_rate: '', loan_pi: '', annual_tax: '', arv: '' }; },
     clearSingle() { this.single = this.blankSingle(); this.singleError = ''; },
     async loadBatches() { try { this.batches = await this.api('/api/owned/batches'); } catch (e) { this.error = e.message; } },
     goHome() { if (this.queueRunning && !confirm('Leaving pauses the batch. Continue?')) return; this.stopQueue(); this.view = 'home'; this.batch = null; history.pushState({}, '', location.pathname); this.loadBatches(); },
@@ -741,14 +989,17 @@ function portfolio() {
       const body = {};
       for (const [k, v] of Object.entries(this.single)) {
         if (v === '' || v == null) continue;
-        body[k] = ['address', 'notes'].includes(k) ? String(v).trim() : Number(v);
+        body[k] = ['address', 'notes', 'date_vacant'].includes(k) ? String(v).trim() : Number(v);
       }
       try {
         const b = await this.api('/api/owned/single', { method: 'POST', json: body });
         this.showBatch(b);
         await this.startQueue();
         const row = this.batch.rows[0];
-        if (row && row.status === 'done') { localStorage.removeItem('owned_single_draft_v2'); this.single = this.blankSingle(); this.openReport(row); }
+        if (row && row.status === 'done') {
+          localStorage.removeItem('owned_single_draft_v2'); this.single = this.blankSingle(); this.openReport(row);
+          this.runWriteup(row);
+        }
         else if (row) { this.singleError = row.error || 'The analysis did not finish.'; }
       } catch (e) { this.singleError = e.message; }
       finally { this.singleBusy = false; }
@@ -827,6 +1078,7 @@ function portfolio() {
 
     // formatting (D14)
     money(v) { if (v == null || isNaN(v)) return '—'; const n = Math.round(v / 100) * 100; return (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString(); },
+    money1(v) { if (v == null || isNaN(v)) return '—'; const n = Math.round(v); return (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString(); },
     fmtDate(s) { if (!s) return ''; const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z'); return d.toLocaleDateString(); },
     fmtMetric(m, s) {
       const v = s[m.key];
@@ -839,6 +1091,30 @@ function portfolio() {
       return v;
     },
     md(t) { return t ? marked.parse(escapeHtml(t)) : ''; },
+    writeupSection(mdText, heading) {
+      if (!mdText) return '';
+      const lines = mdText.split('\n');
+      const start = lines.findIndex(l => l.trim() === '## ' + heading);
+      if (start === -1) return '';
+      let end = lines.length;
+      for (let i = start + 1; i < lines.length; i++) { if (/^##\s/.test(lines[i])) { end = i; break; } }
+      // The disclaimer closes the write-up; it is shown once at the bottom of the report.
+      return lines.slice(start + 1, end).filter(l => !/^this analysis is an investment model/i.test(l.trim())).join('\n').trim();
+    },
+    riskLabel(v) { if (v == null) return '—'; return v <= 3 ? 'Low' : (v <= 6 ? 'Medium' : 'High'); },
+    riskColor(v) { if (v == null) return ''; return 'color:' + (v <= 3 ? 'var(--green-light)' : (v <= 6 ? 'var(--gold-light)' : 'var(--red)')); },
+    lcD(r) { return (this.scen(r, 'rehab_land_contract').details) || {}; },
+    sortedFlags(r) { const order = { critical: 0, warning: 1, info: 2 }; return [...(r.analysis.flags || [])].sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3)); },
+    holdingRows(r) {
+      const b = (r.analysis.vacancy && r.analysis.vacancy.monthly_breakdown) || {};
+      const defs = [
+        { k: 'property_tax', label: 'Property tax' }, { k: 'insurance', label: 'Insurance' },
+        { k: 'utilities', label: 'Utilities' }, { k: 'maintenance', label: 'Maintenance' },
+        { k: 'security', label: 'Security' }, { k: 'other', label: 'Other' },
+        { k: 'loan_interest', label: 'Loan interest' },
+      ];
+      return defs.filter(d => ['property_tax', 'insurance'].includes(d.k) || b[d.k]);
+    },
     banner(r) {
       const rec = this.recOf(r); const win = this.scen(r, rec.strategy); const ru = this.scen(r, rec.runner_up);
       const w = escapeHtml(this.label(rec.strategy)), o = escapeHtml(this.label(rec.runner_up));
@@ -977,9 +1253,34 @@ function portfolio() {
     },
 
     // ── report ──
-    openReport(r) { this.report = r; this.view = 'report'; this.writeupText = ''; this.writeupError = ''; window.scrollTo(0, 0); },
+    openReport(r) { this.report = r; this.view = 'report'; this.writeupText = ''; this.writeupError = ''; this.fillLcForm(r); window.scrollTo(0, 0); },
     reportIndex() { return this.reportList().findIndex(r => r.id === this.report.id); },
     stepReport(d) { const list = this.reportList(); const i = this.reportIndex() + d; if (list[i]) this.openReport(list[i]); },
+    fillLcForm(r) {
+      const d = this.lcD(r);
+      this.lcForm = { sale_price: d.lc_price ?? '', down_pct: d.down_pct ?? '', rate_pct: d.rate_pct ?? '', term_years: d.amort_years ?? '', default_prob_pct: d.default_prob_pct ?? '' };
+    },
+    async recalcLc(r) {
+      this.lcBusy = true; this.lcError = '';
+      try {
+        const body = { sale_price: Number(this.lcForm.sale_price), down_pct: Number(this.lcForm.down_pct), rate_pct: Number(this.lcForm.rate_pct), term_years: Number(this.lcForm.term_years), default_prob_pct: Number(this.lcForm.default_prob_pct) };
+        const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${r.id}/lc-terms`, { method: 'POST', json: body });
+        Object.assign(r, resp);
+        const idx = this.batch.rows.findIndex(x => x.id === r.id);
+        if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
+        this.fillLcForm(r);
+      } catch (e) { this.lcError = e.message; } finally { this.lcBusy = false; }
+    },
+    async resetLc(r) {
+      this.lcBusy = true; this.lcError = '';
+      try {
+        const resp = await this.api(`/api/owned/batches/${this.batch.id}/rows/${r.id}/lc-terms`, { method: 'POST', json: { reset: true } });
+        Object.assign(r, resp);
+        const idx = this.batch.rows.findIndex(x => x.id === r.id);
+        if (idx !== -1) Object.assign(this.batch.rows[idx], resp);
+        this.fillLcForm(r);
+      } catch (e) { this.lcError = e.message; } finally { this.lcBusy = false; }
+    },
     async runWriteup(r) {
       this.writeupBusy = true; this.writeupText = ''; this.writeupError = '';
       try {

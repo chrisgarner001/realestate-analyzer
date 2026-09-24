@@ -320,3 +320,72 @@ class TestUnknownRehab:
     def test_known_rehab_kept(self):
         r = resolve(_prop(rehab_budget=5000, as_is_value=90000, arv=110000), Assumptions())
         assert r.rehab_budget == 5000
+
+
+# ── waterfall reconciliation ────────────────────────────────────────────────
+
+class TestWaterfall:
+    def _check_all_scenarios(self, out):
+        for s in out["scenarios"]:
+            wf = s["details"]["waterfall"]
+            last = wf[-1]
+            assert last.get("total") is True
+            assert last["amount"] == pytest.approx(round(s["net_profit"], 2), abs=1.0)
+            non_total_sum = sum(row["amount"] for row in wf[:-1])
+            assert non_total_sum == pytest.approx(last["amount"], abs=1.0)
+
+    def test_waterfall_totals_reconcile_without_loan_or_payback(self):
+        out = analyze(_prop(), A, with_break_even=False)
+        self._check_all_scenarios(out)
+
+    def test_waterfall_totals_reconcile_with_loan_and_investor_payback(self):
+        out = analyze(_prop(loan_payoff=40000, loan_rate_pct=6.0, loan_pi=500, investor_payback=15000),
+                      A, with_break_even=False)
+        self._check_all_scenarios(out)
+
+
+# ── vacancy carry (S1) ──────────────────────────────────────────────────────
+
+class TestVacancyCarry:
+    def test_carry_since_vacant_and_cost_basis_adjustment(self):
+        out = analyze(_prop(months_vacant=9, cost_basis=100000), A, with_break_even=False)
+        v = out["vacancy"]
+        assert v["carry_since_vacant"] == pytest.approx(round(9 * v["monthly_carry"], 2), abs=0.01)
+        assert v["cost_basis_adjusted"] == pytest.approx(100000 + v["carry_since_vacant"], abs=0.01)
+        assert any(f["message"].startswith("Vacant 9 months") for f in out["flags"])
+        for s in out["scenarios"]:
+            assert s["profit_vs_cost_basis"] == pytest.approx(s["net_profit"] - v["cost_basis_adjusted"], abs=0.01)
+
+    def test_no_vacant_flag_under_six_months(self):
+        out = analyze(_prop(months_vacant=4), A, with_break_even=False)
+        assert not any(f["message"].startswith("Vacant") for f in out["flags"])
+
+    def test_cost_basis_adjusted_is_none_without_cost_basis(self):
+        out = analyze(_prop(months_vacant=9, cost_basis=None), A, with_break_even=False)
+        assert out["vacancy"]["cost_basis_adjusted"] is None
+
+
+class TestVacancyBreakdown:
+    def test_breakdown_keys_and_extra_holding_costs(self):
+        out = analyze(_prop(security_monthly=50, other_holding_monthly=25,
+                            loan_payoff=50000, loan_rate_pct=6.0, loan_pi=500), A, with_break_even=False)
+        breakdown = out["vacancy"]["monthly_breakdown"]
+        assert set(breakdown) == {"property_tax", "insurance", "utilities", "maintenance",
+                                  "security", "other", "loan_interest"}
+        assert breakdown["security"] == 50
+        assert breakdown["other"] == 25
+        assert breakdown["loan_interest"] == pytest.approx(50000 * 6.0 / 1200.0, abs=0.01)
+
+
+# ── flag suggestions ────────────────────────────────────────────────────────
+
+class TestFlagSuggestions:
+    def test_warning_and_critical_flags_all_have_suggestions(self):
+        p = _prop(loan_payoff=90000, loan_rate_pct=0.0, loan_pi=0.0, investor_payback=30000,
+                  lc_forfeiture_history=True, rehab_budget=60000, arv=135000)
+        out = analyze(p, A, with_break_even=False)
+        risky = [f for f in out["flags"] if f["severity"] in ("warning", "critical")]
+        # sanity: this property is built to trip several distinct warning/critical flags
+        assert len(risky) >= 3
+        for f in risky:
+            assert f.get("suggestion")

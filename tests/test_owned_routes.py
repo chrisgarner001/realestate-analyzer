@@ -389,3 +389,93 @@ class TestSingleEntry:
         # vacant carry = tax + insurance + P&I (interest-only 40k @ 8%) + 150 + 75 + 50 + 25
         carry = -a["scenarios"][0]["monthly_cash_flows"][1]
         assert round(carry) == round(3100 / 12 + 100 + 40000 * 0.08 / 12 + 300)
+
+
+class TestSingleVacancyMonths:
+    def test_months_vacant_derived_from_date_vacant(self, client, db, fake_anthropic, setup):
+        vacant_date = (datetime.utcnow() - timedelta(days=300)).strftime("%Y-%m-%d")
+        s = client.post("/api/owned/single", headers=setup["h"],
+                        json={"address": "100 Sample St, Sample Town, MI 48000",
+                              "date_vacant": vacant_date}).json()
+        row = s["rows"][0]
+        assert row["inputs"]["vacant_since"] == vacant_date
+        fake_anthropic.create_texts.append(ESTIMATE)
+        client.post(f"/api/owned/batches/{s['id']}/rows/{row['id']}/run", headers=setup["h"])
+        stored = _row(db, row["id"])
+        assert stored.status == "done", stored.error
+        a = json.loads(stored.analysis)
+        assert a["vacancy"]["months_vacant"] == pytest.approx(300 / 30.44, abs=0.2)
+
+
+class TestLcTerms:
+    def test_set_terms_then_reset(self, client, db, fake_anthropic, setup):
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake_anthropic)
+        before = _balance(db, setup["user"])
+        resp = client.post(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/lc-terms",
+                           headers=setup["h"],
+                           json={"sale_price": 150000, "down_pct": 15, "rate_pct": 9,
+                                 "term_years": 25, "default_prob_pct": 10})
+        assert resp.status_code == 200
+        body = resp.json()
+        lc = next(sc for sc in body["analysis"]["scenarios"]
+                 if sc["strategy"] == "rehab_land_contract")["details"]
+        assert lc["down_pct"] == 15 and lc["rate_pct"] == 9
+        assert lc["amort_years"] == 25 and lc["default_prob_pct"] == 10
+        assert lc["lc_price"] == pytest.approx(150000, abs=1.0)
+        assert _balance(db, setup["user"]) == before
+        assert "_lc_terms" in body["overrides"]
+
+        reset = client.post(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/lc-terms",
+                            headers=setup["h"], json={"reset": True}).json()
+        lc2 = next(sc for sc in reset["analysis"]["scenarios"]
+                  if sc["strategy"] == "rehab_land_contract")["details"]
+        assert lc2["rate_pct"] == 10 and lc2["down_pct"] == 10 and lc2["amort_years"] == 30
+
+    def test_requires_a_completed_run(self, client, setup):
+        row = _runnable(setup["batch"])[1]
+        resp = client.post(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/lc-terms",
+                           headers=setup["h"], json={"sale_price": 150000})
+        assert resp.status_code == 409
+
+
+class TestLcTermsSurviveEditsAndRecalculate:
+    def test_patch_keeps_lc_terms_and_recalculate_uses_the_custom_rate(self, client, db, fake_anthropic, setup):
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake_anthropic)
+        client.post(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/lc-terms",
+                   headers=setup["h"], json={"rate_pct": 9})
+        patched = client.patch(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}",
+                               headers=setup["h"], json={"overrides": {"annual_insurance": 1500}}).json()
+        assert "_lc_terms" in patched["overrides"]
+        out = client.post(f"/api/owned/batches/{setup['batch']['id']}/recalculate", headers=setup["h"]).json()
+        row_out = next(r for r in out["rows"] if r["id"] == row["id"])
+        lc = next(sc for sc in row_out["analysis"]["scenarios"]
+                 if sc["strategy"] == "rehab_land_contract")["details"]
+        assert lc["rate_pct"] == 9
+
+
+class TestEstimatePassThrough:
+    def test_sale_rental_comps_and_market_reach_the_row(self, client, db, fake_anthropic, setup):
+        est = json.loads(ESTIMATE)
+        est["sale_comps"] = [{"address": "1 A St", "sale_price": 90000}]
+        est["rental_comps"] = [{"address": "2 B St", "monthly_rent": 1300}]
+        est["market"] = {"classification": "Balanced"}
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake_anthropic, estimate=json.dumps(est))
+        batch = client.get(f"/api/owned/batches/{setup['batch']['id']}", headers=setup["h"]).json()
+        row_out = next(r for r in batch["rows"] if r["id"] == row["id"])
+        assert row_out["estimates"]["sale_comps"] == est["sale_comps"]
+        assert row_out["estimates"]["rental_comps"] == est["rental_comps"]
+        assert row_out["estimates"]["market"] == est["market"]
+
+
+class TestWriteupContext:
+    def test_research_context_has_market_and_owner_entered_tax(self, client, db, fake_anthropic, setup):
+        row = _runnable(setup["batch"])[0]
+        _run(client, setup, row, fake_anthropic)
+        client.post(f"/api/owned/batches/{setup['batch']['id']}/rows/{row['id']}/writeup", headers=setup["h"])
+        last_call = fake_anthropic.stream_calls[-1]
+        content = json.loads(last_call["messages"][0]["content"])
+        assert "research" in content
+        assert "market" in content["research"] and "owner_entered_tax" in content["research"]
