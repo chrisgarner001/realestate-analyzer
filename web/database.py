@@ -3,7 +3,7 @@ Database models and session factory for PropYield.
 Uses PostgreSQL in production (DATABASE_URL env var) or SQLite locally.
 """
 from sqlalchemy import (create_engine, Column, Integer, String, Text, Boolean,
-                         DateTime, Float, ForeignKey, Index, UniqueConstraint)
+                         DateTime, Float, ForeignKey, Index, UniqueConstraint, LargeBinary)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
 from datetime import datetime
@@ -81,6 +81,9 @@ class Tenant(Base):
     invite_template = Column(Text)   # admin-saved JSON: master invite email copy + logo
     tier            = Column(String(20),  default="partner")  # partner | solo
     setup_intent_id = Column(String(200), unique=True)  # solo signup: consumed Stripe SetupIntent, prevents replay
+    asset_analysis_enabled = Column(Boolean, default=False)  # owned-asset exit module entitlement
+    lc_servicer     = Column(String(100))   # e.g. "SGMS": LC servicing/compliance handled (downgrades flag)
+    owned_defaults  = Column(Text)          # JSON: last-used batch assumptions (remembered per tenant)
 
     users    = relationship("User",     back_populates="tenant", cascade="all, delete-orphan")
     analyses = relationship("Analysis", back_populates="tenant")
@@ -200,6 +203,71 @@ class RateLimitBucket(Base):
     window_start = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class OwnedBatch(Base):
+    """One owned-asset exit run: an uploaded inventory (kind='batch') or a
+    single property (kind='single', a batch of one)."""
+    __tablename__ = "owned_batches"
+    id             = Column(Integer, primary_key=True, index=True)
+    tenant_id      = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind           = Column(String(20), default="batch")        # batch | single
+    file_name      = Column(String(300))
+    assumptions    = Column(Text)                                # JSON of owned_asset.Assumptions overrides
+    address_hash   = Column(String(64), index=True)              # duplicate-run warning
+    summary_emailed = Column(Boolean, default=False)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    finished_at    = Column(DateTime)
+
+    rows = relationship("OwnedBatchRow", back_populates="batch", cascade="all, delete-orphan",
+                        order_by="OwnedBatchRow.row_number")
+
+
+class OwnedBatchRow(Base):
+    __tablename__ = "owned_batch_rows"
+    id            = Column(Integer, primary_key=True, index=True)
+    batch_id      = Column(Integer, ForeignKey("owned_batches.id"), nullable=False, index=True)
+    row_number    = Column(Integer, nullable=False)
+    include       = Column(Boolean, default=True)
+    # queued | running | done | failed_refunded | failed_charged | skipped_pending | excluded
+    status        = Column(String(30), default="queued", index=True)
+    inputs        = Column(Text)        # JSON: parsed CSV fields
+    overrides     = Column(Text)        # JSON: Edit-drawer values (loan, payback, basis, ...)
+    flags         = Column(Text)        # JSON list of preview flags
+    estimates     = Column(Text)        # JSON: DATA from the estimate call, with sources (reused by free recalc)
+    analysis      = Column(Text)        # JSON: owned_asset.analyze() output
+    rationale     = Column(Text)
+    rationale_assumptions = Column(String(64))   # hash of assumptions the rationale was written under
+    writeup       = Column(Text)
+    writeup_status = Column(String(20))          # None | running | done
+    debited       = Column(Integer, default=0)
+    error         = Column(Text)
+    started_at    = Column(DateTime)
+    finished_at   = Column(DateTime)
+
+    batch = relationship("OwnedBatch", back_populates="rows")
+
+
+class OwnedStatement(Base):
+    """Uploaded loan statement (N3). File bytes are kept only until the
+    statement is confirmed or 24 hours pass (N-design D5)."""
+    __tablename__ = "owned_statements"
+    id             = Column(Integer, primary_key=True, index=True)
+    batch_id       = Column(Integer, ForeignKey("owned_batches.id"), nullable=False, index=True)
+    row_id         = Column(Integer, ForeignKey("owned_batch_rows.id"), nullable=True, index=True)
+    file_name      = Column(String(300))
+    media_type     = Column(String(100))
+    file_bytes     = Column(LargeBinary)
+    status         = Column(String(30), default="reading")  # reading | read | unreadable | password | not_statement | too_large | failed | superseded | confirmed
+    extracted      = Column(Text)          # JSON: address, payoff, rate, pi, statement_date, lender, page, snippets
+    match_tier     = Column(String(20))    # exact | likely | none | multi
+    covers         = Column(Integer, default=1)
+    confirmed      = Column(Boolean, default=False)
+    confirmed_values = Column(Text)        # JSON of confirmed payoff/rate/pi
+    statement_date = Column(DateTime)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    confirmed_at   = Column(DateTime)
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
     id           = Column(Integer, primary_key=True, index=True)
@@ -266,6 +334,13 @@ def init_db():
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE tenants ADD COLUMN setup_intent_id VARCHAR(200)"))
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_tenants_setup_intent_id ON tenants (setup_intent_id)"))
+
+    tenant_columns = {column["name"] for column in inspect(engine).get_columns("tenants")}
+    for col, ddl in (("asset_analysis_enabled", "BOOLEAN DEFAULT FALSE"),
+                     ("lc_servicer", "VARCHAR(100)"), ("owned_defaults", "TEXT")):
+        if col not in tenant_columns:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}"))
 
     # buyer_name/buyer_email became optional; create_all never loosens an
     # existing NOT NULL, so relax it explicitly. SQLite can't ALTER COLUMN at

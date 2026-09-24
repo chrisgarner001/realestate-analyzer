@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PropYield — AI Property Analyzer", lifespan=lifespan)
 app.mount("/public", StaticFiles(directory=Path(__file__).parent / "assets"), name="public")
 
+import owned_routes  # noqa: E402  (imports server lazily inside handlers)
+app.include_router(owned_routes.router)
+
 ALLOWED_ORIGINS = [
     "https://www.propmind.ai",
     "https://propmind.ai",
@@ -848,6 +851,8 @@ class UpdateTenantRequest(BaseModel):
     is_active: Optional[bool] = None
     daily_limit: Optional[int] = None
     token_balance: Optional[int] = None
+    asset_analysis_enabled: Optional[bool] = None
+    lc_servicer: Optional[str] = Field(default=None, max_length=100)
 
 class InviteTemplateRequest(BaseModel):
     logo_url: Optional[str] = Field(default=None, max_length=2_000_000)
@@ -1078,6 +1083,9 @@ async def me(current_user: User = Depends(auth.get_current_user), db: Session = 
         "full_name": current_user.full_name, "role": current_user.role,
         "tenant_id": current_user.tenant_id,
         "slug": tenant.slug if tenant else None,
+        "token_balance": current_user.token_balance or 0,
+        "asset_analysis_enabled": current_user.role == "superadmin" or bool(tenant and tenant.asset_analysis_enabled),
+        "hold_token_cost": owned_routes.hold_cost(),
     }
 
 @app.post("/api/help")
@@ -1703,6 +1711,8 @@ async def super_list_tenants(current_user: User = Depends(auth.require_superadmi
             "primary_color": t.primary_color, "logo_url": t.logo_url,
             "daily_limit": t.daily_limit, "is_active": t.is_active,
             "token_balance": t.token_balance or 0,
+            "asset_analysis_enabled": bool(t.asset_analysis_enabled),
+            "lc_servicer": t.lc_servicer,
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "user_count": user_count, "analysis_count": analysis_count,
             "analyses_today": analyses_today,
@@ -1724,6 +1734,8 @@ async def super_update_tenant(
         if req.token_balance < 0:
             raise HTTPException(400, "Token balance cannot be negative")
         tenant.token_balance = req.token_balance
+    if req.asset_analysis_enabled is not None: tenant.asset_analysis_enabled = req.asset_analysis_enabled
+    if req.lc_servicer is not None: tenant.lc_servicer = req.lc_servicer.strip() or None
     db.commit()
     return {"ok": True}
 
@@ -1946,6 +1958,13 @@ async def get_super():
 async def get_solo_signup():
     p = Path(__file__).parent / "solo-signup.html"
     return HTMLResponse(p.read_text(encoding="utf-8") if p.exists() else "<h1>solo-signup.html not found</h1>")
+
+@app.get("/{slug}/portfolio", response_class=HTMLResponse)
+async def get_portfolio(slug: str):
+    if slug in RESERVED:
+        raise HTTPException(404)
+    p = Path(__file__).parent / "portfolio.html"
+    return HTMLResponse(p.read_text(encoding="utf-8") if p.exists() else "<h1>portfolio.html not found</h1>")
 
 @app.get("/{slug}/admin", response_class=HTMLResponse)
 async def get_admin(slug: str):
