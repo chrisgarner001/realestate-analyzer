@@ -356,7 +356,7 @@ class TestSingleEntry:
     """Founder layout: address + a few owner-known numbers; the rest is estimated."""
     BODY = {"address": "100 Sample St, Sample Town, MI 48000", "rehab_estimate": 15000, "loan_balance": 40000,
             "insurance_monthly": 100, "utilities_monthly": 150, "maintenance_monthly": 75,
-            "security_monthly": 50, "other_monthly": 25, "cost_basis": 95000,
+            "security_monthly": 50, "grass_snow_monthly": 40, "other_monthly": 25, "cost_basis": 95000,
             "investor_exposure": 30000, "other_owed_at_sale": 2000}
 
     def test_address_parsed_and_fields_mapped(self, client, setup):
@@ -388,7 +388,8 @@ class TestSingleEntry:
         assert any("assumed 8% interest-only" in f["message"] for f in a["flags"])
         # vacant carry = tax + insurance + P&I (interest-only 40k @ 8%) + 150 + 75 + 50 + 25
         carry = -a["scenarios"][0]["monthly_cash_flows"][1]
-        assert round(carry) == round(3100 / 12 + 100 + 40000 * 0.08 / 12 + 300)
+        assert round(carry) == round(3100 / 12 + 100 + 40000 * 0.08 / 12 + 300 + 40)
+        assert a["vacancy"]["monthly_breakdown"]["grass_snow"] == 40
 
 
 class TestSingleVacancyMonths:

@@ -155,7 +155,7 @@ OVERRIDE_BOUNDS = {
     "annual_tax": (0, 100_000), "arv": (1, 10_000_000), "as_is_value": (1, 10_000_000),
     "market_rent": (1, 50_000), "rehab_budget": (0, 500_000), "beds": (0, 20), "baths": (0, 20),
     "sqft": (100, 20_000), "year_built": (1800, 2030),
-    "utilities_monthly": (0, 2_000), "maintenance_monthly": (0, 5_000), "security_monthly": (0, 5_000),
+    "utilities_monthly": (0, 2_000), "maintenance_monthly": (0, 5_000), "security_monthly": (0, 5_000), "grass_snow_monthly": (0, 5_000),
     "other_holding_monthly": (0, 10_000),
 }
 
@@ -722,6 +722,7 @@ class SingleRunRequest(BaseModel):
     utilities_monthly: Optional[float] = Field(None, ge=0, le=2_000)
     maintenance_monthly: Optional[float] = Field(None, ge=0, le=5_000)
     security_monthly: Optional[float] = Field(None, ge=0, le=5_000)
+    grass_snow_monthly: Optional[float] = Field(None, ge=0, le=5_000)
     other_monthly: Optional[float] = Field(None, ge=0, le=10_000)
     annual_tax: Optional[float] = Field(None, ge=0, le=100_000)
     cost_basis: Optional[float] = Field(None, ge=0, le=5_000_000)
@@ -749,7 +750,8 @@ def _single_fields(req: SingleRunRequest) -> dict:
             "annual_tax": req.annual_tax,
             "annual_insurance": req.insurance_monthly * 12 if req.insurance_monthly is not None else None,
             "utilities_monthly": req.utilities_monthly, "maintenance_monthly": req.maintenance_monthly,
-            "security_monthly": req.security_monthly, "other_holding_monthly": req.other_monthly,
+            "security_monthly": req.security_monthly, "grass_snow_monthly": req.grass_snow_monthly,
+            "other_holding_monthly": req.other_monthly,
             "loan_payoff": req.loan_balance, "loan_rate": req.loan_rate, "loan_pi": req.loan_pi,
             "investor_payback": payback if exposure_given else None,
             "investor_exposure": req.investor_exposure, "other_owed_at_sale": req.other_owed_at_sale,

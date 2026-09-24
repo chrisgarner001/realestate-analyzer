@@ -127,10 +127,11 @@ class PropertyInputs:
     rehab_budget: Optional[float] = None
     annual_tax: Optional[float] = None
     annual_insurance: Optional[float] = None
-    # Monthly holding costs while vacant (blank = batch defaults; security/other = $0)
+    # Monthly holding costs while vacant (blank = batch defaults; security/grass-snow/other = $0)
     utilities_monthly: Optional[float] = None
     maintenance_monthly: Optional[float] = None
     security_monthly: Optional[float] = None
+    grass_snow_monthly: Optional[float] = None      # lawn care and snow removal
     other_holding_monthly: Optional[float] = None
     loan_payoff: float = 0.0
     loan_rate_pct: float = 0.0
@@ -247,7 +248,7 @@ class Resolved:
     contingency_pct: float
     annual_tax: float
     annual_insurance: float
-    holding_other_monthly: float                    # utilities + maintenance + security + other
+    holding_other_monthly: float                    # utilities + maintenance + security + grass/snow + other
     vacate_months: int
     cash_for_keys: float
     sources: dict
@@ -311,7 +312,8 @@ def resolve(p: PropertyInputs, a: Assumptions) -> Resolved:
     annual_ins = tag("annual_insurance", p.annual_insurance, a.insurance_default_annual)
     holding_other = (tag("utilities_monthly", p.utilities_monthly, a.utilities_vacant_monthly)
                      + tag("maintenance_monthly", p.maintenance_monthly, a.min_maintenance_monthly)
-                     + (p.security_monthly or 0.0) + (p.other_holding_monthly or 0.0))
+                     + (p.security_monthly or 0.0) + (p.grass_snow_monthly or 0.0)
+                     + (p.other_holding_monthly or 0.0))
     for name in ("beds", "baths", "sqft", "year_built", "cost_basis"):
         if getattr(p, name) is None:
             src.setdefault(name, "DEFAULT")
@@ -981,6 +983,7 @@ def vacancy_carry(r: Resolved) -> dict:
         "utilities": p.utilities_monthly if p.utilities_monthly is not None else a.utilities_vacant_monthly,
         "maintenance": p.maintenance_monthly if p.maintenance_monthly is not None else a.min_maintenance_monthly,
         "security": p.security_monthly or 0.0,
+        "grass_snow": p.grass_snow_monthly or 0.0,
         "other": p.other_holding_monthly or 0.0,
         "loan_interest": p.loan_payoff * p.loan_rate_pct / 1200.0 if p.loan_payoff else 0.0,
     }
@@ -1062,10 +1065,11 @@ def analyze(p: PropertyInputs, a: Optional[Assumptions] = None, with_break_even:
                    ("utilities_monthly", rp.utilities_monthly if rp.utilities_monthly is not None else a.utilities_vacant_monthly),
                    ("maintenance_monthly", rp.maintenance_monthly if rp.maintenance_monthly is not None else a.min_maintenance_monthly),
                    ("security_monthly", rp.security_monthly or 0.0),
+                   ("grass_snow_monthly", rp.grass_snow_monthly or 0.0),
                    ("other_holding_monthly", rp.other_holding_monthly or 0.0)):
         if val is None:
             continue
-        default = r.sources.get(k) == "DEFAULT" or (k in ("security_monthly", "other_holding_monthly") and getattr(rp, k) is None)
+        default = r.sources.get(k) == "DEFAULT" or (k in ("security_monthly", "grass_snow_monthly", "other_holding_monthly") and getattr(rp, k) is None)
         assumptions_list.append({"name": k, "value": val, "source": "DEFAULT" if default else "USER",
                                  "source_detail": ""})
     return {

@@ -388,6 +388,7 @@ def row_to_inputs_dict(row: ImportedRow) -> dict:
         "utilities_monthly": f.get("utilities_monthly"),
         "maintenance_monthly": f.get("maintenance_monthly"),
         "security_monthly": f.get("security_monthly"),
+        "grass_snow_monthly": f.get("grass_snow_monthly"),
         "other_holding_monthly": f.get("other_holding_monthly"),
         "loan_payoff": f.get("loan_payoff") or 0.0,
         "loan_rate_pct": f.get("loan_rate") or 0.0,

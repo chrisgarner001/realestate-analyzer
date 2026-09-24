@@ -371,7 +371,7 @@ class TestVacancyBreakdown:
                             loan_payoff=50000, loan_rate_pct=6.0, loan_pi=500), A, with_break_even=False)
         breakdown = out["vacancy"]["monthly_breakdown"]
         assert set(breakdown) == {"property_tax", "insurance", "utilities", "maintenance",
-                                  "security", "other", "loan_interest"}
+                                  "security", "grass_snow", "other", "loan_interest"}
         assert breakdown["security"] == 50
         assert breakdown["other"] == 25
         assert breakdown["loan_interest"] == pytest.approx(50000 * 6.0 / 1200.0, abs=0.01)
